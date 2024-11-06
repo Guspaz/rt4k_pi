@@ -1,0 +1,38 @@
+﻿@using System.Diagnostics
+@using System.Net.NetworkInformation
+@using System.Net.Sockets
+@inherits RazorSliceHttpResult<AppState>
+@implements IUsesLayout<_Layout, LayoutModel>
+
+@functions {
+    public LayoutModel LayoutModel => new() { Title = "Status" };
+
+    TimeSpan GetUptime() => TimeSpan.FromSeconds(Stopwatch.GetTimestamp() / Stopwatch.Frequency);
+
+    string FormatTimeSpan(TimeSpan span) =>
+        $"{(span.Days > 0 ? $"{span.Days} day{(span.Days > 1 ? "s" : "")}, " : "")}" +
+        $"{(span.Hours > 0 ? $"{span.Hours} hour{(span.Hours > 1 ? "s" : "")}, " : "")}" +
+        $"{(span.Minutes > 0 ? $"{span.Minutes} minute{(span.Minutes > 1 ? "s" : "")}, " : "")}" +
+        $"{span.Seconds} second{(span.Seconds != 1 ? "s" : "")}".TrimEnd(',', ' ');
+
+    public static string GetLocalIPAddress()
+    {
+        return NetworkInterface
+            .GetAllNetworkInterfaces()
+            ?.FirstOrDefault(ni => ni.OperationalStatus == OperationalStatus.Up && (ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet || ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211))
+            ?.GetIPProperties()
+            ?.UnicastAddresses
+            ?.FirstOrDefault(ua => ua.Address.AddressFamily == AddressFamily.InterNetwork)
+            ?.Address
+            ?.ToString()
+            ?? "Unknown";
+    }
+}
+
+<div class='w3-panel'>
+    <table class='w3-table-all w3-card' style='max-width: 700px;'>
+        <tr><th>IP Address</th><td>@GetLocalIPAddress()</td></tr>
+        <tr><th>Uptime</th><td>@FormatTimeSpan(GetUptime())</td></tr>
+        <tr><th>RT4K Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
+    </table>
+</div>
