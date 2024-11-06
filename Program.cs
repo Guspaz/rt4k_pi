@@ -1,4 +1,6 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.FileProviders;
 using rt4k_pi.Slices;
 
 namespace rt4k_pi
@@ -11,6 +13,10 @@ namespace rt4k_pi
 
         public static void Main(string[] args)
         {
+            // Run all output through the debug log
+            var logger = new Logger();
+            Console.SetOut(logger);
+            
             Console.WriteLine($"rt4k_pi v{VERSION}");
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -24,21 +30,33 @@ namespace rt4k_pi
                 var memInfo = GetMemInfo();
             }
 
+            var allowedHosts = new Dictionary<string, string?>
+            {
+                { "AllowedHosts", "example.com;localhost" }
+            };
+
             var builder = WebApplication.CreateSlimBuilder(args);
-            builder.WebHost.UseUrls("http://*:8080");
+            builder.Configuration.Sources.Clear(); // Disable appsettings
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { { "AllowedHosts", "*" } });
+            builder.WebHost.UseUrls("http://*:80");
+
+            var embeddedProvider = new EmbeddedFileProvider(Assembly.GetExecutingAssembly(), "rt4k_pi");
 
             var app = builder.Build();
 
-            // Code here runs at startup, but the page code runs on load.
-            // If we're being lazy/quick about it, just embed code in the pages.
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = embeddedProvider
+            });
 
-            //app.MapGet("/", () => Results.Extensions.RazorSlice<Slices.Hello, (DateTime Time, Dictionary<string, string> MemInfo)>((Time: DateTime.Now, MemInfo: memInfo)));
-            //app.MapGet("/Test1", () => Results.Extensions.RazorSlice<Slices.Test1, ViewState>(foo));
-            //app.MapGet("/Test2", () => Results.Extensions.RazorSlice<Slices.Test2, ViewState>(foo));
+            var appState = new AppState() { Logger = logger, Serial = Serial };
 
-            var appState = new AppState() { Serial = Serial };
+            // Static file overrides
+            app.MapGet("/favicon.ico", () => Results.File(embeddedProvider.GetFileInfo("Static/favicon.ico").CreateReadStream(), "image/x-icon"));
 
+            // Pages
             app.MapGet("/", () => Results.Extensions.RazorSlice<Slices.Status, Slices.AppState>(appState));
+            app.MapGet("/DebugLog", () => Results.Extensions.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
 
             app.Run();
         }

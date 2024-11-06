@@ -23,46 +23,39 @@ namespace rt4k_pi
                     Console.WriteLine("Serial port does not exist, waiting for connection.");
                 }
 
+                var readTask = Task.Run(HandleRead, cts.Token);
+
                 while (!cts.Token.IsCancellationRequested)
                 {
                     try
                     {
-                        var currentPort = GetPort();
-                        if (currentPort != null)
+                        if (IsConnected && !File.Exists(port.Name))
                         {
-                            Console.WriteLine($"Detected serial port at {currentPort}");
-                            Console.WriteLine($"Connecting to {currentPort}");
-                            ConfigurePort(currentPort, baudRate);
-                            port = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-                            Console.WriteLine($"Connected to {currentPort}");
-                            IsConnected = true;
-
-                            // Run the read loop until aborted
-                            await Task.Run(HandleRead, cts.Token);
+                            throw new IOException("Serial port disconnected");
+                        }
+                        else if (!IsConnected)
+                        {
+                            var currentPort = GetPort();
+                            if (currentPort != null)
+                            {
+                                Console.WriteLine($"Detected serial port at {currentPort}");
+                                Console.WriteLine($"Connecting to {currentPort}");
+                                ConfigurePort(currentPort, baudRate);
+                                port = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                                Console.WriteLine($"Connected to {currentPort}");
+                                IsConnected = true;
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Serial port error: {ex.Message}. Retrying in 2 seconds...");
+                        Console.WriteLine($"Serial port error: {ex.Message}");
+                        IsConnected = false;
+                        //port.Close();
+                        port.Dispose();
                     }
 
-                    IsConnected = false;
-                    await Task.Delay(2000); // Wait before retrying
-                }
-            }, cts.Token);
-
-            // Monitor connection status
-            Task.Run(async () =>
-            {
-                while (!cts.Token.IsCancellationRequested)
-                {
                     await Task.Delay(2000);
-
-                    if (IsConnected && !File.Exists(port.Name))
-                    {
-                        Console.WriteLine("Serial port disconnected.");
-                        port.Close();
-                    }
                 }
             }, cts.Token);
         }
@@ -99,25 +92,50 @@ namespace rt4k_pi
             }
         }
 
-        private void HandleRead()
+        private async void HandleRead()
         {
             Console.WriteLine("Starting serial read loop");
             byte[] readBuf = new byte[4096];
             while (!cts.Token.IsCancellationRequested)
             {
-                // Blocks until there's data, I think?
-                int read = port.Read(readBuf, 0, readBuf.Length);
-
-                if (read > 0)
+                if (IsConnected)
                 {
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.Write(encoding.GetString(readBuf, 0, read));
-                    Console.ResetColor();
+                    int read = 0;
 
-                    foreach (Action<byte[]> action in readers)
+                    try
                     {
-                        action(readBuf[0..read]);
+                        // Blocks until there's data, I think?
+                        read = port.Read(readBuf, 0, readBuf.Length);
                     }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Serial error: {ex.Message}");
+                        IsConnected = false;
+                        port.Dispose();
+                    }
+
+                    if (read > 0)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.Write(encoding.GetString(readBuf, 0, read));
+                        Console.ResetColor();
+
+                        foreach (Action<byte[]> action in readers)
+                        {
+                            try
+                            {
+                                action(readBuf[0..read]);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Warning: error calling registered reader: {ex.Message}");
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    await Task.Delay(500);
                 }
             }
         }

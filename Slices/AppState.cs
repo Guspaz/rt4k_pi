@@ -3,5 +3,6 @@
     public class AppState
     {
         public Serial? Serial { get; set; }
+        public required Logger Logger { get; set; }
     }
 }

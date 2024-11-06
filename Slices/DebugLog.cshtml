@@ -1,0 +1,29 @@
+﻿@using System.Diagnostics
+@using System.Net.NetworkInformation
+@using System.Net.Sockets
+@using System.Text.RegularExpressions
+@inherits RazorSliceHttpResult<AppState>
+@implements IUsesLayout<_Layout, LayoutModel>
+
+@functions {
+    public LayoutModel LayoutModel => new() { Title = "Debug Log" };
+
+    public string GetColor(ConsoleColor color) => color switch
+    {
+        ConsoleColor.Green => "#16c60c",
+        ConsoleColor.DarkRed => "#c50f1f",
+        _ => "#cccccc"
+    };
+
+    // TODO: Add some sort of actual ansi colour support, but the pre tag will escape it all
+    public string FilterAnsi(string line)
+    {
+        return Regex.Replace(line, "\\[\\d+m", "");
+    }
+}
+
+<div class="w3-panel w3-card w3-text-white" style="width: 1200px; background-color: #0c0c0c;">
+    <pre style="white-space: pre-wrap; word-break: break-word;">
+        @foreach (Logger.LogEntry line in Model.Logger.Log) {<span style="color: @GetColor(line.Color);">@FilterAnsi(line.Entry)</span>}
+    </pre>
+</div>
