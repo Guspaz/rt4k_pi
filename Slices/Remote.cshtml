@@ -1,0 +1,341 @@
+﻿@inherits RazorSliceHttpResult<AppState>
+@implements IUsesLayout<_Layout, LayoutModel>
+
+@functions {
+    public LayoutModel LayoutModel => new() {
+        Title = "Remote",
+        ExtraHeaders = new("<script src='/Static/imageMapResizer.min.js'></script>")
+    };
+}
+
+<img style="width: 250px;" src="Static/rt4k_remote.avif" usemap="#image-map" />
+
+<map name="image-map">
+    <area alt="Power" title="Power" href="#" coords="106,203,276,375" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Menu" title="Menu" href="#" coords="115,1036,261,1039,261,1090,172,1181,116,1182" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Up" title="Up" href="#" coords="338,1239,246,1145,319,1097,410,1079,512,1095,584,1147,489,1238,417,1213" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Down" title="Down" href="#" coords="342,1435,410,1462,488,1436,582,1530,514,1577,411,1596,313,1576,248,1529" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Left" title="Left" href="#" coords="317,1260,220,1165,171,1247,158,1338,171,1424,223,1508,316,1411,291,1339" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Right" title="Right" href="#" coords="514,1262,610,1166,657,1245,674,1339,653,1437,610,1510,514,1411,538,1340" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="OK" title="OK" href="#" coords="415,1338,89" shape="circle" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Back" title="Back" href="#" coords="569,1034,715,1035,714,1185,658,1183,569,1092" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Diagnostic" title="Diagnostic" href="#" coords="114,1492,116,1638,264,1639,262,1580,170,1491" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Status" title="Status" href="#" coords="717,1490,717,1639,569,1639,569,1583,657,1491" shape="poly" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Input" title="Input" href="#" coords="317,207,428,268" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Output" title="Output" href="#" coords="466,208,576,268" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Scaler" title="Scaler" href="#" coords="616,207,726,268" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="SFX" title="SFX" href="#" coords="318,311,428,372" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="ADC" title="ADC" href="#" coords="465,309,577,372" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile" title="Profile" href="#" coords="615,310,725,371" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 1" title="Profile 1" href="#" coords="106,441,277,542" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 2" title="Profile 2" href="#" coords="328,441,502,543" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 3" title="Profile 3" href="#" coords="552,439,726,544" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 4" title="Profile 4" href="#" coords="104,581,278,685" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 5" title="Profile 5" href="#" coords="327,582,502,685" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 6" title="Profile 6" href="#" coords="553,581,726,684" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 7" title="Profile 7" href="#" coords="104,724,277,825" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 8" title="Profile 8" href="#" coords="328,723,502,826" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 9" title="Profile 9" href="#" coords="552,723,725,825" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 10" title="Profile 10" href="#" coords="104,866,278,967" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 11" title="Profile 11" href="#" coords="329,864,502,967" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Profile 12" title="Profile 12" href="#" coords="551,865,725,967" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Gain" title="Gain" href="#" coords="114,1709,277,1896" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Phase" title="Phase" href="#" coords="115,1896,277,2081" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Pause" title="Pause" href="#" coords="344,1727,486,1868" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Safe" title="Safe" href="#" coords="344,1919,487,2061" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Genlock" title="Genlock" href="#" coords="553,1707,717,1896" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Buffer" title="Buffer" href="#" coords="553,1895,714,2081" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution 4K" title="Resolution 4K" href="#" coords="104,2150,228,2229" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution 1080p" title="Resolution 1080p" href="#" coords="270,2150,395,2228" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution 1440p" title="Resolution 1440p" href="#" coords="436,2150,560,2229" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution 480p" title="Resolution 480p" href="#" coords="603,2150,726,2230" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution User 1" title="Resolution User 1" href="#" coords="103,2291,229,2372" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution User 2" title="Resolution User 2" href="#" coords="269,2290,394,2371" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution User 3" title="Resolution User 3" href="#" coords="437,2290,561,2370" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Resolution User 4" title="Resolution User 4" href="#" coords="602,2292,727,2370" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 1" title="Aux 1" href="#" coords="104,2573,228,2653" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 2" title="Aux 2" href="#" coords="269,2573,394,2654" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 3" title="Aux 3" href="#" coords="437,2574,561,2653" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 4" title="Aux 4" href="#" coords="601,2574,726,2653" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 5" title="Aux 5" href="#" coords="104,2715,229,2795" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 6" title="Aux 6" href="#" coords="269,2715,394,2794" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 7" title="Aux 7" href="#" coords="437,2716,561,2794" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+    <area alt="Aux 8" title="Aux 8" href="#" coords="603,2716,727,2794" shape="rect" onclick="handleAreaClick(this.alt); return false;">
+</map>
+
+<script>
+    async function handleAreaClick(param) {
+        await fetch(`/RemoteCommand/${param.replace(/\s/g, "")}`, { method: 'POST' });
+    }
+</script>
+
+<script>imageMapResize();</script>
+
+@*
+
+<svg style="width:100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 830 3319">
+<style>
+.image-mapper-shape {
+    fill: rgba(0, 0, 0, 0);
+}
+g:hover .image-mapper-shape {
+    stroke: white;
+    stroke-width: 2px;
+    opacity: 20%;
+}
+</style>
+
+<image xlink:href="rt4k_remote.avif" style="width: 830px;"></image>
+<a xlink:href="#" target="---" xlink:title="Power">
+<g>
+<rect x="106" y="203" width="170" height="172" class="image-mapper-shape" data-index="1"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Input">
+<g>
+<rect x="317" y="207" width="111" height="61" class="image-mapper-shape" data-index="2"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Out">
+<g>
+<rect x="466" y="208" width="110" height="60" class="image-mapper-shape" data-index="3"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Scale">
+<g>
+<rect x="616" y="207" width="110" height="61" class="image-mapper-shape" data-index="4"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="SFX">
+<g>
+<rect x="318" y="311" width="110" height="61" class="image-mapper-shape" data-index="5"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="ADC">
+<g>
+<rect x="465" y="309" width="112" height="63" class="image-mapper-shape" data-index="6"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile">
+<g>
+<rect x="615" y="310" width="110" height="61" class="image-mapper-shape" data-index="7"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 1">
+<g>
+<rect x="106" y="441" width="171" height="101" class="image-mapper-shape" data-index="8"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 2">
+<g>
+<rect x="328" y="441" width="174" height="102" class="image-mapper-shape" data-index="9"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 3">
+<g>
+<rect x="552" y="439" width="174" height="105" class="image-mapper-shape" data-index="10"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 4">
+<g>
+<rect x="104" y="581" width="174" height="104" class="image-mapper-shape" data-index="11"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 5">
+<g>
+<rect x="327" y="582" width="175" height="103" class="image-mapper-shape" data-index="12"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 6">
+<g>
+<rect x="553" y="581" width="173" height="103" class="image-mapper-shape" data-index="13"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 7">
+<g>
+<rect x="104" y="724" width="173" height="101" class="image-mapper-shape" data-index="14"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 8">
+<g>
+<rect x="328" y="723" width="174" height="103" class="image-mapper-shape" data-index="15"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 9">
+<g>
+<rect x="552" y="723" width="173" height="102" class="image-mapper-shape" data-index="16"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 10">
+<g>
+<rect x="104" y="866" width="174" height="101" class="image-mapper-shape" data-index="17"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 11">
+<g>
+<rect x="329" y="864" width="173" height="103" class="image-mapper-shape" data-index="18"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Profile 12">
+<g>
+<rect x="551" y="865" width="174" height="102" class="image-mapper-shape" data-index="19"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Menu">
+<g>
+<polygon class="image-mapper-shape" data-index="20" points="115 1036 261 1039 261 1090 172 1181 116 1182"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Back">
+<g>
+<polygon class="image-mapper-shape" data-index="21" points="569 1034 715 1035 714 1185 658 1183 569 1092"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Up">
+<g>
+<polygon class="image-mapper-shape" data-index="22" points="338 1239 246 1145 319 1097 410 1079 512 1095 584 1147 489 1238 417 1213"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Down">
+<g>
+<polygon class="image-mapper-shape" data-index="23" points="342 1435 410 1462 488 1436 582 1530 514 1577 411 1596 313 1576 248 1529"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Left">
+<g>
+<polygon class="image-mapper-shape" data-index="24" points="317 1260 220 1165 171 1247 158 1338 171 1424 223 1508 316 1411 291 1339"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Right">
+<g>
+<polygon class="image-mapper-shape" data-index="25" points="514 1262 610 1166 657 1245 674 1339 653 1437 610 1510 514 1411 538 1340"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Enter">
+<g>
+<circle cx="415" cy="1338" r="89.30845424706443" class="image-mapper-shape" data-index="26"></circle>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Diag">
+<g>
+<polygon class="image-mapper-shape" data-index="27" points="114 1492 116 1638 264 1639 262 1580 170 1491"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Stat">
+<g>
+<polygon class="image-mapper-shape" data-index="28" points="717 1490 717 1639 569 1639 569 1583 657 1491"></polygon>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Pause">
+<g>
+<rect x="344" y="1727" width="142" height="141" class="image-mapper-shape" data-index="29"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Safe">
+<g>
+<rect x="344" y="1919" width="143" height="142" class="image-mapper-shape" data-index="30"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Gain">
+<g>
+<rect x="114" y="1709" width="163" height="187" class="image-mapper-shape" data-index="31"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Phase">
+<g>
+<rect x="115" y="1896" width="162" height="185" class="image-mapper-shape" data-index="32"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Genlock">
+<g>
+<rect x="553" y="1707" width="164" height="189" class="image-mapper-shape" data-index="33"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Buffered">
+<g>
+<rect x="553" y="1895" width="161" height="186" class="image-mapper-shape" data-index="34"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="4K">
+<g>
+<rect x="104" y="2150" width="124" height="79" class="image-mapper-shape" data-index="35"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="1080p">
+<g>
+<rect x="270" y="2150" width="125" height="78" class="image-mapper-shape" data-index="36"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="1440p">
+<g>
+<rect x="436" y="2150" width="124" height="79" class="image-mapper-shape" data-index="37"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="480p">
+<g>
+<rect x="603" y="2150" width="123" height="80" class="image-mapper-shape" data-index="38"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="User Resolution 1">
+<g>
+<rect x="103" y="2291" width="126" height="81" class="image-mapper-shape" data-index="39"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="User Resolution 2">
+<g>
+<rect x="269" y="2290" width="125" height="81" class="image-mapper-shape" data-index="40"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="User Resolution 3">
+<g>
+<rect x="437" y="2290" width="124" height="80" class="image-mapper-shape" data-index="41"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="User Resolution 4">
+<g>
+<rect x="602" y="2292" width="125" height="78" class="image-mapper-shape" data-index="42"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 1">
+<g>
+<rect x="104" y="2573" width="124" height="80" class="image-mapper-shape" data-index="43"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 2">
+<g>
+<rect x="269" y="2573" width="125" height="81" class="image-mapper-shape" data-index="44"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 3">
+<g>
+<rect x="437" y="2574" width="124" height="79" class="image-mapper-shape" data-index="45"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 4">
+<g>
+<rect x="601" y="2574" width="125" height="79" class="image-mapper-shape" data-index="46"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 5">
+<g>
+<rect x="104" y="2715" width="125" height="80" class="image-mapper-shape" data-index="47"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 6">
+<g>
+<rect x="269" y="2715" width="125" height="79" class="image-mapper-shape" data-index="48"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 7">
+<g>
+<rect x="437" y="2716" width="124" height="78" class="image-mapper-shape" data-index="49"></rect>
+</g>
+</a>
+<a xlink:href="#" target="---" xlink:title="Aux 8">
+<g>
+<rect x="603" y="2716" width="124" height="78" class="image-mapper-shape" data-index="50"></rect>
+</g>
+</a>
+</svg>
+
+*@

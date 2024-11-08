@@ -5,7 +5,8 @@ namespace rt4k_pi
     public class Logger : TextWriter
     {
         public struct LogEntry { public string Entry; public ConsoleColor Color; }
-        private const int QUEUE_SIZE = 1000;
+        private const int QUEUE_SIZE = 16 * 1024;
+        private int logSize = 0;
 
         public Queue<LogEntry> Log { get; } = new Queue<LogEntry>();
 
@@ -18,6 +19,8 @@ namespace rt4k_pi
             // Write to the original console
             oldOut.Write(buffer, index, count);
 
+            logSize += count;
+
             // Append to our debug log
             Log.Enqueue(
                 new LogEntry()
@@ -26,9 +29,10 @@ namespace rt4k_pi
                     Color = Console.ForegroundColor
                 });
 
-            if (Log.Count > QUEUE_SIZE)
+            // Keep the queue under the max size
+            while (logSize > QUEUE_SIZE)
             {
-                Log.Dequeue();
+                logSize -= Log.Dequeue().Entry.Length;
             }
         }
     }

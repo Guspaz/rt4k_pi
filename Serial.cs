@@ -5,6 +5,8 @@ namespace rt4k_pi
 {
     // This is all terrible and can be massively improved.
 
+    // TODO: Needs to not interrupt writes, so a queue? Queue needs to be thread-safe and support a max size.
+
     public class Serial
     {
         public bool IsConnected { get; private set; }
@@ -68,29 +70,8 @@ namespace rt4k_pi
 
         private static string? GetPort() => Directory.GetFiles("/dev", "ttyUSB*").FirstOrDefault();
 
-        private static void ConfigurePort(string portName, int baudRate)
-        {
-            using (Process? process = Process.Start(
-                new ProcessStartInfo {
-                    FileName = "stty",
-                    Arguments = $"-F {portName} {baudRate} cs8 -cstopb -parenb",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true }))
-            {
-                if (null == process)
-                {
-                    throw new IOException($"Failed to configure serial port: unable to start stty");
-                }
-
-                process.WaitForExit();
-                if (process.ExitCode != 0)
-                {
-                    string error = process.StandardError.ReadToEnd();
-                    throw new IOException($"Failed to configure serial port: {error}");
-                }
-            }
-        }
+        private static void ConfigurePort(string portName, int baudRate) =>
+            Util.RunCommand("stty", $"-F {portName} {baudRate} cs8 -cstopb -parenb");
 
         private async void HandleRead()
         {

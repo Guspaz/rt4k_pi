@@ -1,25 +1,31 @@
 ﻿@inherits RazorLayoutSlice<LayoutModel>
 
+@{
+    string selected = "font-weight: bolder;";
+}
+
 <!DOCTYPE html>
 <html lang="en">
     <head>
         <title>RT4K - @Model.Title</title>
-        @(await RenderPartialAsync<w3>())
-        @(await RenderPartialAsync<w3_colors_metro>())
+        <link rel="stylesheet" href="/Static/w3.css">
+        @(Model.ExtraHeaders)
+        
     </head>
     <body class="w3-metro-light-blue">
         <!-- Sidebar -->
         <div class="w3-sidebar w3-light-gray w3-card-4" style="width: 180px; display: block;">
-            <div class="w3-bar-block w3-dark-gray w3-padding-16 w3-center">
+            <div class="w3-bar-block w3-blue-gray w3-padding-16 w3-center">
                 <b>RT4K</b>
             </div>
             <div class="w3-bar-block">
-                <a href="/" class="w3-bar-item w3-button">Status</a>
-                <!--<a href="/readme" class="w3-bar-item w3-button">Readme</a>
-                <a href="/settings" class="w3-bar-item w3-button">Settings</a>
-                <a href="/actions" class="w3-bar-item w3-button">Actions</a>
-                <a href="/videoTimings" class="w3-bar-item w3-button">Video Timings</a>-->
-                <a href="/DebugLog" class="w3-bar-item w3-button">Debug Log</a>
+                <a href="/" class="w3-bar-item w3-button" style="@(Model.Title == "Status" ? selected : "")">Status</a>
+                <a href="/Remote" class="w3-bar-item w3-button" style="@(Model.Title == "Remote" ? selected : "")">Remote</a>
+                    <!--<a href="/readme" class="w3-bar-item w3-button">Readme</a>
+                    <a href="/settings" class="w3-bar-item w3-button">Settings</a>
+                    <a href="/actions" class="w3-bar-item w3-button">Actions</a>
+                    <a href="/videoTimings" class="w3-bar-item w3-button">Video Timings</a>-->
+                <a href="/DebugLog" class="w3-bar-item w3-button" style="@(Model.Title == "Debug Log" ? selected : "")">Debug Log</a>
             </div>
         </div>
 

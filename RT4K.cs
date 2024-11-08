@@ -1,6 +1,6 @@
 ﻿namespace rt4k_pi
 {
-    internal class RT4K(Serial serial)
+    public class RT4K(Serial serial)
     {
         public enum Remote
         {
@@ -15,6 +15,7 @@
             Diagnostic,
             Status,
             Input,
+            Output,
             Scaler,
             SFX,
             ADC,
@@ -68,6 +69,7 @@
             { Remote.Diagnostic, "diag"},
             { Remote.Status, "stat"},
             { Remote.Input, "input"},
+            { Remote.Output, "output"},
             { Remote.Scaler, "scaler"},
             { Remote.SFX, "sfx"},
             { Remote.ADC, "adc"},
@@ -107,6 +109,18 @@
             { Remote.Aux7, "aux7"},
             { Remote.Aux8, "aux8"}
         };
+
+        public void SendRemoteString(string remoteString)
+        {
+            if (Enum.TryParse(remoteString, true, out Remote remote))
+            {
+                SendRemote(remote);
+            }
+            else
+            {
+                Console.WriteLine($"Unrecognized remote string: {remoteString}");
+            }
+        }
 
         public void SendRemote(Remote remote)
         {

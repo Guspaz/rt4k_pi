@@ -7,15 +7,15 @@
 @functions {
     public LayoutModel LayoutModel => new() { Title = "Status" };
 
-    TimeSpan GetUptime() => TimeSpan.FromSeconds(Stopwatch.GetTimestamp() / Stopwatch.Frequency);
+    private TimeSpan GetUptime() => TimeSpan.FromSeconds(Stopwatch.GetTimestamp() / Stopwatch.Frequency);
 
-    string FormatTimeSpan(TimeSpan span) =>
+    private string FormatTimeSpan(TimeSpan span) =>
         $"{(span.Days > 0 ? $"{span.Days} day{(span.Days > 1 ? "s" : "")}, " : "")}" +
         $"{(span.Hours > 0 ? $"{span.Hours} hour{(span.Hours > 1 ? "s" : "")}, " : "")}" +
         $"{(span.Minutes > 0 ? $"{span.Minutes} minute{(span.Minutes > 1 ? "s" : "")}, " : "")}" +
         $"{span.Seconds} second{(span.Seconds != 1 ? "s" : "")}".TrimEnd(',', ' ');
 
-    public static string GetLocalIPAddress()
+    private static string GetLocalIPAddress()
     {
         return NetworkInterface
             .GetAllNetworkInterfaces()
@@ -27,12 +27,78 @@
             ?.ToString()
             ?? "Unknown";
     }
+
+    private static Dictionary<string, string> GetMemInfo() =>
+        File.ReadLines("/proc/meminfo")
+            .Select(l => l.Split(':', 2, StringSplitOptions.TrimEntries))
+            .ToDictionary(p => p[0], p => p[1]);
+
+    private static Dictionary<string, string> GetWifiInfo()
+    {
+        try
+        {
+            string[] fields = Util.RunCommand("nmcli", "-t -f active,ssid,chan,rate,signal dev wifi").Split('\n').Where(l => l.StartsWith("yes:")).First().Split(':');
+
+            return new Dictionary<string, string>
+            {
+                {"active", fields[0]},
+                {"ssid", fields[1]},
+                {"chan", fields[2]},
+                {"rate", fields[3]},
+                {"signal", fields[4]},
+                {"quality", Convert.ToInt32(fields[4]) switch { > 80 => "great", > 55 => "good", > 30 => "weak", > 5 => "bad", _ => "terrible" } }
+            };
+        }
+        catch
+        {
+            return new Dictionary<string, string> { { "active", "no" }, { "ssid", "" } };
+        }
+
+
+    }
+        
 }
+
+<h2>General</h2>
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th>IP Address</th><td>@GetLocalIPAddress()</td></tr>
-        <tr><th>Uptime</th><td>@FormatTimeSpan(GetUptime())</td></tr>
+        <tr><th style="width: 25%;">rt4k_pi</th><td>v@(rt4k_pi.Program.VERSION)</td></tr>
         <tr><th>RT4K Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
+        <tr><th>IP Address</th><td>@GetLocalIPAddress()</td></tr>
+
+        @if (Model.IsLinux)
+        {
+            var memInfo = GetMemInfo();
+            var root = new DriveInfo("/");
+
+            <tr><th>Total RAM</th><td>@memInfo["MemTotal"]</td></tr>
+            <tr><th>Free RAM</th><td>@memInfo["MemAvailable"]</td></tr>
+            <tr><th>Free Storage</th><td>@(((double)root.AvailableFreeSpace / root.TotalSize * 100).ToString("F2"))%</td></tr>
+        }
+
+        <tr><th>Uptime</th><td>@FormatTimeSpan(GetUptime())</td></tr>
+    </table>
+</div>
+
+<h2>WiFi</h2>
+
+<div class='w3-panel'>
+    <table class='w3-table-all w3-card' style='max-width: 700px;'>
+        @{
+            var wifiInfo = GetWifiInfo();
+
+            if (!string.IsNullOrWhiteSpace(wifiInfo["ssid"]))
+            {
+                <tr><th style="width: 25%;">SSID</th><td>@wifiInfo["ssid"]</td></tr>
+                <tr><th>Signal</th><td>@wifiInfo["signal"]% (@wifiInfo["quality"])</td></tr>
+                <tr><th>Speed</th><td>@wifiInfo["rate"]</td></tr>
+                <tr><th>Channel</th><td>@wifiInfo["chan"]</td></tr>
+            }
+            else
+            {
+                <tr><th>Disconnected/Unknown</th></tr>
+            }
+        }
     </table>
 </div>

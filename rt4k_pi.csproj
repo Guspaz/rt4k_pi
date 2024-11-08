@@ -19,4 +19,10 @@
     <EmbeddedResource Include="Static/**" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Remove="Static\imageMapResizer.min.js" />
+    <None Remove="Static\rt4k_remote.avif" />
+    <None Remove="Static\w3.css" />
+  </ItemGroup>
+
 </Project>
