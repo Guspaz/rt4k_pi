@@ -56,7 +56,11 @@
 
 
     }
-        
+}
+
+@{
+    var localIP = GetLocalIPAddress();
+    var hostname = Util.RunCommand("hostname").ToLower();
 }
 
 <h2>General</h2>
@@ -65,7 +69,8 @@
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         <tr><th style="width: 25%;">rt4k_pi</th><td>v@(rt4k_pi.Program.VERSION)</td></tr>
         <tr><th>RT4K Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
-        <tr><th>IP Address</th><td>@GetLocalIPAddress()</td></tr>
+        <tr><th>IP Address</th><td>@localIP</td></tr>
+        <tr><th>Hostname</th><td>@(hostname).local</td></tr>
 
         @if (Model.IsLinux)
         {
@@ -97,8 +102,27 @@
             }
             else
             {
-                <tr><th>Disconnected/Unknown</th></tr>
+                <tr><th>&#x274C; Disconnected/Unknown</th></tr>
             }
         }
+    </table>
+</div>
+
+<h2>Services</h2>
+
+<div class='w3-panel'>
+    <table class='w3-table-all w3-card' style='max-width: 700px;'>
+        <tr><th style="width: 25%;">Web</th><td>&#x1F7E2; http://@(hostname).local</td></tr>
+        <tr><th>ser2net</th>
+            @if(Model.Ser2net != null)
+            {
+                <td>&#x1F7E2; @(hostname).local:@Model.Ser2net.Port</td>
+            }
+            else
+            {
+                <td>&#x274C; Not running</td>
+            }
+        </td></tr>
+        <tr><th>WebDAV</th><td>&#x274C; Not implemented</td></tr>
     </table>
 </div>

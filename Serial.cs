@@ -1,11 +1,12 @@
 ﻿using System.Diagnostics;
 using System.Text;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace rt4k_pi
 {
     // This is all terrible and can be massively improved.
 
-    // TODO: Needs to not interrupt writes, so a queue? Queue needs to be thread-safe and support a max size.
+    // TODO: Implement a max size for the write queue, we don't want to queue up an entire big file in one go.
 
     public class Serial
     {
@@ -15,6 +16,7 @@ namespace rt4k_pi
         private readonly HashSet<Action<byte[]>> readers = [];
         private readonly Encoding encoding = Encoding.ASCII;
         private readonly CancellationTokenSource cts = new();
+        private readonly Queue<byte[]> writeQueue = new();
 
         public Serial(int baudRate)
         {
@@ -26,6 +28,7 @@ namespace rt4k_pi
                 }
 
                 var readTask = Task.Run(HandleRead, cts.Token);
+                var writeTask = Task.Run(HandleWrite, cts.Token);
 
                 while (!cts.Token.IsCancellationRequested)
                 {
@@ -73,7 +76,29 @@ namespace rt4k_pi
         private static void ConfigurePort(string portName, int baudRate) =>
             Util.RunCommand("stty", $"-F {portName} {baudRate} cs8 -cstopb -parenb");
 
-        private async void HandleRead()
+        private void HandleWrite()
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                if (IsConnected && writeQueue.Count > 0)
+                {
+                    while (writeQueue.Count > 0)
+                    {
+                        byte[] data = writeQueue.Dequeue();
+                        Console.ForegroundColor = ConsoleColor.DarkRed;
+                        Console.Write(encoding.GetString(data));
+                        Console.ResetColor();
+
+                        port.Write(data);
+                        port.Flush(); // TODO: Do we need this flush here?
+                    }
+                }
+
+                Thread.Sleep(0);
+            }
+        }
+
+        private void HandleRead()
         {
             Console.WriteLine("Starting serial read loop");
             byte[] readBuf = new byte[4096];
@@ -116,7 +141,7 @@ namespace rt4k_pi
                 }
                 else
                 {
-                    await Task.Delay(500);
+                    Thread.Sleep(0);
                 }
             }
         }
@@ -135,13 +160,8 @@ namespace rt4k_pi
         {
             if (IsConnected)
             {
-                Console.ForegroundColor = ConsoleColor.DarkRed;
-                Console.Write(encoding.GetString(data));
-                Console.ResetColor();
-
-                port.Write(data);
-                port.Flush();
-                // TODO: Do we need this flush here?
+                // TODO: Add a limit here and block if the queue is full?
+                writeQueue.Enqueue(data);
             }
         }
     }

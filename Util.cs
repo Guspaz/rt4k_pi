@@ -4,7 +4,7 @@ namespace rt4k_pi
 {
     public class Util
     {
-        public static string RunCommand(string FileName, string Arguments)
+        public static string RunCommand(string FileName, string Arguments = "")
         {
             var process = new Process
             {

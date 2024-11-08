@@ -6,6 +6,7 @@ namespace rt4k_pi.Slices
     {
         public bool IsLinux { get; } = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
         public Serial? Serial { get; set; }
+        public Ser2net? Ser2net { get; set; }
         public required Logger Logger { get; set; }
     }
 }

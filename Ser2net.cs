@@ -3,10 +3,12 @@ using System.Net.Sockets;
 
 namespace rt4k_pi
 {
-    internal class Ser2net(Serial serial, int port)
+    public class Ser2net(Serial serial, int Port)
     {
-        private readonly TcpListener listener = new(IPAddress.Any, port);
+        private readonly TcpListener listener = new(IPAddress.Any, Port);
         private readonly CancellationTokenSource cts = new();
+
+        public int Port { get; private set; } = Port;
 
         public void Start()
         {
@@ -14,7 +16,7 @@ namespace rt4k_pi
 
             listener.Start();
 
-            Console.WriteLine($"Listening for connections on port {port}");
+            Console.WriteLine($"Listening for connections on port {Port}");
 
             Task.Run(async () =>
             {

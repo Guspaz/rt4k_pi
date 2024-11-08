@@ -8,6 +8,7 @@ namespace rt4k_pi
 
         public static Serial? Serial {get; private set;}
         public static RT4K? RT4K {get; private set;}
+        public static Ser2net? Ser2net {get; private set;}
 
         private static readonly Logger logger = new();
 
@@ -22,9 +23,9 @@ namespace rt4k_pi
             {
                 Serial = new Serial(115200);
                 RT4K = new RT4K(Serial);
-                var ser2net = new Ser2net(Serial, 2000);
+                Ser2net = new Ser2net(Serial, 2000);
 
-                ser2net.Start();
+                Ser2net.Start();
             }
 
             RunWeb();
