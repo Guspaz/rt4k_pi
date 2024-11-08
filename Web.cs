@@ -51,6 +51,7 @@ namespace rt4k_pi
             // Pages
             app.MapGet("/", () => Results.Extensions.RazorSlice<Slices.Status, Slices.AppState>(appState));
             app.MapGet("/Remote", () => Results.Extensions.RazorSlice<Slices.Remote, Slices.AppState>(appState));
+            app.MapGet("/Calculator", () => Results.Extensions.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
             app.MapPost("/RemoteCommand/{cmd}", ([FromRoute] string cmd) => { RT4K?.SendRemoteString(cmd); });
             app.MapGet("/DebugLog", () => Results.Extensions.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
 

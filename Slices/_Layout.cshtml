@@ -14,7 +14,7 @@
     </head>
     <body class="w3-metro-light-blue">
         <!-- Sidebar -->
-        <div class="w3-sidebar w3-light-gray w3-card-4" style="width: 180px; display: block;">
+        <div class="w3-sidebar w3-light-gray w3-card-4" style="width: 190px; display: block;">
             <div class="w3-bar-block w3-blue-gray w3-padding-16 w3-center">
                 <b>RT4K</b>
             </div>
@@ -23,14 +23,14 @@
                 <a href="/Remote" class="w3-bar-item w3-button" style="@(Model.Title == "Remote" ? selected : "")">Remote</a>
                     <!--<a href="/readme" class="w3-bar-item w3-button">Readme</a>
                     <a href="/settings" class="w3-bar-item w3-button">Settings</a>
-                    <a href="/actions" class="w3-bar-item w3-button">Actions</a>
-                    <a href="/videoTimings" class="w3-bar-item w3-button">Video Timings</a>-->
+                    <a href="/actions" class="w3-bar-item w3-button">Actions</a>-->
+                <a href="/Calculator" class="w3-bar-item w3-button" style="@(Model.Title == "Video Timings Calculator" ? selected : "")">Timings Calculator</a>
                 <a href="/DebugLog" class="w3-bar-item w3-button" style="@(Model.Title == "Debug Log" ? selected : "")">Debug Log</a>
             </div>
         </div>
 
         <!-- Page content -->
-        <div style="margin-left: 180px;">
+        <div style="margin-left: 200px;">
             <div class="w3-container">
                 <h1>@Model.Title</h1>
                 @await RenderBodyAsync()
