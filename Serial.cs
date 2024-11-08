@@ -17,6 +17,7 @@ namespace rt4k_pi
         private readonly Encoding encoding = Encoding.ASCII;
         private readonly CancellationTokenSource cts = new();
         private readonly Queue<byte[]> writeQueue = new();
+        private CancellationTokenSource writeToken = new();
 
         public Serial(int baudRate)
         {
@@ -27,6 +28,7 @@ namespace rt4k_pi
                     Console.WriteLine("Serial port does not exist, waiting for connection.");
                 }
 
+                // TODO: These are async functions, do they even need a task?
                 var readTask = Task.Run(HandleRead, cts.Token);
                 var writeTask = Task.Run(HandleWrite, cts.Token);
 
@@ -54,9 +56,8 @@ namespace rt4k_pi
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Serial port error: {ex.Message}");
+                        Console.WriteLine($"Serial error: {ex.Message}");
                         IsConnected = false;
-                        //port.Close();
                         port.Dispose();
                     }
 
@@ -76,29 +77,38 @@ namespace rt4k_pi
         private static void ConfigurePort(string portName, int baudRate) =>
             Util.RunCommand("stty", $"-F {portName} {baudRate} cs8 -cstopb -parenb");
 
-        private void HandleWrite()
+        private async void HandleWrite()
         {
             while (!cts.IsCancellationRequested)
             {
-                if (IsConnected && writeQueue.Count > 0)
-                {
-                    while (writeQueue.Count > 0)
-                    {
-                        byte[] data = writeQueue.Dequeue();
-                        Console.ForegroundColor = ConsoleColor.DarkRed;
-                        Console.Write(encoding.GetString(data));
-                        Console.ResetColor();
+                // TODO: Link cts and writeToken with CreateLinkedTokenSource
+                try { await Task.Delay(-1, writeToken.Token); } catch { }
+                writeToken.Dispose();
+                writeToken = new();
 
+                while (IsConnected && writeQueue.Count > 0)
+                {
+                    byte[] data = writeQueue.Dequeue();
+                    Console.ForegroundColor = ConsoleColor.DarkRed;
+                    Console.Write(encoding.GetString(data));
+                    Console.ResetColor();
+
+                    try
+                    {
                         port.Write(data);
                         port.Flush(); // TODO: Do we need this flush here?
                     }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Serial error: {ex.Message}");
+                        IsConnected = false;
+                        port.Dispose();
+                    }
                 }
-
-                Thread.Sleep(0);
             }
         }
 
-        private void HandleRead()
+        private async void HandleRead()
         {
             Console.WriteLine("Starting serial read loop");
             byte[] readBuf = new byte[4096];
@@ -141,7 +151,7 @@ namespace rt4k_pi
                 }
                 else
                 {
-                    Thread.Sleep(0);
+                    await Task.Delay(100);
                 }
             }
         }
@@ -162,6 +172,9 @@ namespace rt4k_pi
             {
                 // TODO: Add a limit here and block if the queue is full?
                 writeQueue.Enqueue(data);
+
+                // Bypass the write delay
+                try { writeToken.CancelAsync(); } catch { }
             }
         }
     }
