@@ -35,7 +35,7 @@ namespace rt4k_pi
                 //ServeUnknownFileTypes = true
             });
 
-            var appState = new AppState() { Logger = logger, Serial = Serial, Ser2net = Ser2net };
+            var appState = new AppState() { Logger = logger, Serial = Serial, Ser2net = Ser2net, StatusDaemon = StatusDaemon };
 
             var assembly = Assembly.GetExecutingAssembly();
 

@@ -31,36 +31,20 @@
     private static Dictionary<string, string> GetMemInfo() =>
         File.ReadLines("/proc/meminfo")
             .Select(l => l.Split(':', 2, StringSplitOptions.TrimEntries))
-            .ToDictionary(p => p[0], p => p[1]);
+            .ToDictionary(p => p[0], p => p[1].Split(' ')[0]);
 
-    private static Dictionary<string, string> GetWifiInfo()
+    private static double GetFreeMem()
     {
-        try
-        {
-            string[] fields = Util.RunCommand("nmcli", "-t -f active,ssid,chan,rate,signal dev wifi").Split('\n').Where(l => l.StartsWith("yes:")).First().Split(':');
+        var memInfo = GetMemInfo();
+        int memTotal = Convert.ToInt32(memInfo["MemTotal"]) + Convert.ToInt32(memInfo["SwapTotal"]);
+        int memFree = Convert.ToInt32(memInfo["MemAvailable"]) + Convert.ToInt32(memInfo["SwapFree"]);
 
-            return new Dictionary<string, string>
-            {
-                {"active", fields[0]},
-                {"ssid", fields[1]},
-                {"chan", fields[2]},
-                {"rate", fields[3]},
-                {"signal", fields[4]},
-                {"quality", Convert.ToInt32(fields[4]) switch { > 80 => "great", > 55 => "good", > 30 => "weak", > 5 => "bad", _ => "terrible" } }
-            };
-        }
-        catch
-        {
-            return new Dictionary<string, string> { { "active", "no" }, { "ssid", "" } };
-        }
-
-
+        return (double)memFree / memTotal;
     }
 }
 
 @{
     var localIP = GetLocalIPAddress();
-    var hostname = Util.RunCommand("hostname").ToLower();
 }
 
 <h2>General</h2>
@@ -70,15 +54,14 @@
         <tr><th style="width: 25%;">rt4k_pi</th><td>v@(rt4k_pi.Program.VERSION)</td></tr>
         <tr><th>RT4K Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
         <tr><th>IP Address</th><td>@localIP</td></tr>
-        <tr><th>Hostname</th><td>@(hostname).local</td></tr>
+        <tr><th>Hostname</th><td>@(Model.StatusDaemon.Hostname).local</td></tr>
 
         @if (Model.IsLinux)
         {
-            var memInfo = GetMemInfo();
+            var memFree = GetFreeMem();
             var root = new DriveInfo("/");
 
-            <tr><th>Total RAM</th><td>@memInfo["MemTotal"]</td></tr>
-            <tr><th>Free RAM</th><td>@memInfo["MemAvailable"]</td></tr>
+            <tr><th>Free Memory</th><td>@((memFree * 100).ToString("F2"))%</td></tr>
             <tr><th>Free Storage</th><td>@(((double)root.AvailableFreeSpace / root.TotalSize * 100).ToString("F2"))%</td></tr>
         }
 
@@ -91,7 +74,7 @@
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         @{
-            var wifiInfo = GetWifiInfo();
+            var wifiInfo = Model.StatusDaemon.WifiStatus;
 
             if (!string.IsNullOrWhiteSpace(wifiInfo["ssid"]))
             {
@@ -112,17 +95,17 @@
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">Web</th><td>&#x1F7E2; http://@(hostname).local</td></tr>
+        <tr><th style="width: 25%;">Web</th><td>&#x1F7E2; http://@(Model.StatusDaemon.Hostname).local</td></tr>
         <tr><th>ser2net</th>
             @if(Model.Ser2net != null)
             {
-                <td>&#x1F7E2; @(hostname).local:@Model.Ser2net.Port</td>
+                <td>&#x1F7E2; @(Model.StatusDaemon.Hostname).local:@Model.Ser2net.Port</td>
             }
             else
             {
                 <td>&#x274C; Not running</td>
             }
-        </td></tr>
+        </tr>
         <tr><th>WebDAV</th><td>&#x274C; Not implemented</td></tr>
     </table>
 </div>
