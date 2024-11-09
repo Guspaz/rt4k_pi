@@ -4,7 +4,6 @@
  * - Ability to change SSID/password
  * - Some sort of SVS command support
  * - Pizza button
- * - Rework RAM display on status page
  * - First-run install support (register as service)
  * - Auto-update support
  * - Backup settings to RT4K (requires serial file IO)
