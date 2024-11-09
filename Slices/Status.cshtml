@@ -95,11 +95,11 @@
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">Web</th><td>&#x1F7E2; http://@(Model.StatusDaemon.Hostname).local</td></tr>
+        <tr><th style="width: 25%;">Web</th><td>&#x1F7E2; http://@(Model.StatusDaemon.Hostname).local or http://@localIP</td></tr>
         <tr><th>ser2net</th>
             @if(Model.Ser2net != null)
             {
-                <td>&#x1F7E2; @(Model.StatusDaemon.Hostname).local:@Model.Ser2net.Port</td>
+                <td>&#x1F7E2; @(Model.StatusDaemon.Hostname).local:@Model.Ser2net.Port or @localIP:@Model.Ser2net.Port</td>
             }
             else
             {
