@@ -17,7 +17,10 @@ namespace rt4k_pi
         private readonly Encoding encoding = Encoding.ASCII;
         private readonly CancellationTokenSource cts = new();
         private readonly Queue<byte[]> writeQueue = new();
-        private CancellationTokenSource writeToken = new();
+        private TaskCompletionSource writeCompletion = new();
+        private int writeQueueLength = 0;
+
+        private readonly int maxQueueLength = 8 * 1024 * 1024; // 8MB write buffer
 
         public Serial(int baudRate)
         {
@@ -81,14 +84,14 @@ namespace rt4k_pi
         {
             while (!cts.IsCancellationRequested)
             {
-                // TODO: Link cts and writeToken with CreateLinkedTokenSource
-                try { await Task.Delay(-1, writeToken.Token); } catch { }
-                writeToken.Dispose();
-                writeToken = new();
+                // Wait until we're notified there's data to write
+                await writeCompletion.Task.WaitAsync(cts.Token);
+                writeCompletion = new TaskCompletionSource();
 
                 while (IsConnected && writeQueue.Count > 0)
                 {
                     byte[] data = writeQueue.Dequeue();
+                    writeQueueLength -= data.Length;
                     Console.ForegroundColor = ConsoleColor.DarkRed;
                     Console.Write(encoding.GetString(data));
                     Console.ResetColor();
@@ -120,7 +123,7 @@ namespace rt4k_pi
 
                     try
                     {
-                        // Blocks until there's data, I think?
+                        // Blocks until there's data
                         read = port.Read(readBuf, 0, readBuf.Length);
                     }
                     catch (Exception ex)
@@ -165,16 +168,27 @@ namespace rt4k_pi
             this.Write(encoding.GetBytes(data + '\n'));
         }
 
-        // TODO: Make this async somehow
         public void Write(byte[] data)
         {
             if (IsConnected)
             {
-                // TODO: Add a limit here and block if the queue is full?
+                while (writeQueueLength >= maxQueueLength)
+                {
+                    if (!IsConnected)
+                    {
+                        // If we lose the connection, just drop the data 
+                        return;
+                    }
+
+                    Thread.Sleep(1);
+                }
+
                 writeQueue.Enqueue(data);
 
-                // Bypass the write delay
-                try { writeToken.CancelAsync(); } catch { }
+                writeQueueLength += data.Length;
+
+                // Wake up the write handler
+                writeCompletion.TrySetResult();
             }
         }
     }

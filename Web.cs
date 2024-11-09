@@ -27,6 +27,7 @@ namespace rt4k_pi
             var contentProvider = new FileExtensionContentTypeProvider();
             contentProvider.Mappings.Add(".avif", "image/avif");
 
+            // TODO: MapStaticAssets in .NET 9 (may not work with the embedded provider)
             app.UseStaticFiles(new StaticFileOptions
             {
                 FileProvider = embeddedProvider,
