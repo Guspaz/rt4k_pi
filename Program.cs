@@ -13,6 +13,10 @@
  * - Limited ANSI colour support for debug log
  * - Readme page
  * - Support for displaying messages (success/error) at the top of pages
+ * - Some options for different virtual remote sizes
+ * - Flicker remote LED when clicking button
+ * - Real power toggling with remote (requires RT4K "get pwr" type command)
+ * - Better mobile experience
  */
 
 using System.Runtime.InteropServices;

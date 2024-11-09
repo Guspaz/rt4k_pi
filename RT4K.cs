@@ -2,6 +2,8 @@
 {
     public class RT4K(Serial serial)
     {
+        private bool lastPowerState = false;
+
         public enum Remote
         {
             Power,
@@ -114,6 +116,18 @@
         {
             if (Enum.TryParse(remoteString, true, out Remote remote))
             {
+                // TODO: Proper power toggling support (query RT4K instead of lastPowerState)
+                if (remote == Remote.Power)
+                {
+                    lastPowerState = !lastPowerState;
+
+                    if (lastPowerState) // Inverted
+                    {
+                        TurnOn();
+                        return;
+                    }
+                }
+
                 SendRemote(remote);
             }
             else
