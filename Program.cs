@@ -50,3 +50,16 @@ namespace rt4k_pi
         }
     }
 }
+
+//[Unit]
+//Description=rt4k_pi
+//After=network.target
+//StartLimitIntervalSec=0
+//[Service]
+//Type=simple
+//Restart=always
+//RestartSec=1
+//ExecStart=/home/pi/rt4k
+
+//[Install]
+//WantedBy=multi-user.target
