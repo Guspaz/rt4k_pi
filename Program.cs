@@ -4,7 +4,6 @@
  * - Ability to change SSID/password
  * - Some sort of SVS command support
  * - Pizza button
- * - First-run install support (register as service)
  * - Auto-update support
  * - Backup settings to RT4K (requires serial file IO)
  * - WebDAV server (requires serial file IO)
@@ -14,7 +13,6 @@
  * - Readme page
  * - Support for displaying messages (success/error) at the top of pages
  * - Some options for different virtual remote sizes
- * - Flicker remote LED when clicking button
  * - Real power toggling with remote (requires RT4K "get pwr" type command)
  * - Better mobile experience
  */
