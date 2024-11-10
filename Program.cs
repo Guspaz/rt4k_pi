@@ -39,10 +39,12 @@ namespace rt4k_pi
             // Run all output through the debug log
             Console.SetOut(logger);
             
-            Console.WriteLine($"rt4k_pi v{VERSION}");
+            Console.WriteLine($"rt4k_pi v{VERSION}\n");
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
+                new Installer().DoInstall();
+
                 Serial = new Serial(115200);
                 RT4K = new RT4K(Serial);
                 Ser2net = new Ser2net(Serial, 2000);
@@ -55,15 +57,3 @@ namespace rt4k_pi
     }
 }
 
-//[Unit]
-//Description=rt4k_pi
-//After=network.target
-//StartLimitIntervalSec=0
-//[Service]
-//Type=simple
-//Restart=always
-//RestartSec=1
-//ExecStart=/home/pi/rt4k
-
-//[Install]
-//WantedBy=multi-user.target
