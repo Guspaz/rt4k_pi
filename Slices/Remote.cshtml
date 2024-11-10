@@ -8,7 +8,10 @@
     };
 }
 
-<img style="width: 250px;" src="Static/rt4k_remote.avif" usemap="#image-map" />
+<div>
+    <img style="width: 250px; position: absolute;" src="Static/rt4k_remote.avif" />
+    <img style="width: 250px; position: absolute; opacity: 0%;" src="Static/rt4k_remote_led.png" usemap="#image-map" id="remoteLed" />
+</div>
 
 <map name="image-map">
     <area alt="Power" title="Power" href="#" coords="106,203,276,375" shape="rect" onclick="handleAreaClick(this.alt); return false;">
@@ -65,7 +68,27 @@
 
 <script>
     async function handleAreaClick(param) {
+        blinkImage();
+
         await fetch(`/RemoteCommand/${param.replace(/\s/g, "")}`, { method: 'POST' });
+    }
+
+    function blinkImage() {
+        const image = document.getElementById('remoteLed');
+        let count = 0;
+        const maxBlinks = 6;
+        const opacities = [1, 0.75];
+
+        image.style.opacity = opacities[0];
+
+        const interval = setInterval(() => {
+            count++;
+            image.style.opacity = opacities[count % 2];
+            if (count >= maxBlinks) {
+                clearInterval(interval);
+                image.style.opacity = 0;
+            }
+        }, 50);
     }
 </script>
 
