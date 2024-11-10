@@ -364,3 +364,5 @@ FodyWeavers.xsd
 
 # Custom stuff
 push
+watch
+stop
