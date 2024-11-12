@@ -39,6 +39,7 @@ namespace rt4k_pi
             
             Console.WriteLine($"rt4k_pi v{VERSION}\n");
 
+            // We don't actually support Windows, but it's useful for testing.
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
                 new Installer().DoInstall();

@@ -20,6 +20,9 @@ namespace rt4k_pi
         private TaskCompletionSource writeCompletion = new();
         private int writeQueueLength = 0;
 
+        private bool fileModeRequested = false;
+        private bool fileModeActive = false;
+
         private readonly int maxQueueLength = 8 * 1024 * 1024; // 8MB write buffer
 
         public Serial(int baudRate)
@@ -88,7 +91,17 @@ namespace rt4k_pi
                 await writeCompletion.Task.WaitAsync(cts.Token);
                 writeCompletion = new TaskCompletionSource();
 
-                while (IsConnected && writeQueue.Count > 0)
+                // Handle entering/exiting file mode
+                if (fileModeRequested && !fileModeActive)
+                {
+                    fileModeActive = true;
+                }
+                else if (fileModeActive && !fileModeRequested)
+                {
+                    fileModeActive = false;
+                }
+
+                while (IsConnected && !fileModeActive && writeQueue.Count > 0)
                 {
                     byte[] data = writeQueue.Dequeue();
                     writeQueueLength -= data.Length;
@@ -108,6 +121,32 @@ namespace rt4k_pi
                         port.Dispose();
                     }
                 }
+            }
+        }
+
+        private async void EnterFileMode()
+        {
+            // Request entering file mode and wake the write thread to acknowledge it
+            fileModeRequested = true;
+            writeCompletion.SetResult();
+
+            // Wait for file mode to activate
+            while (!fileModeActive)
+            {
+                await Task.Delay(1);
+            }
+        }
+
+        private async void ExitFileMode()
+        {
+            // Request exiting file mode and wake the write thread to acknowledge it
+            fileModeRequested = false;
+            writeCompletion.SetResult();
+
+            // Wait for file mode to deactivate
+            while (fileModeActive)
+            {
+                await Task.Delay(1);
             }
         }
 
@@ -168,27 +207,37 @@ namespace rt4k_pi
             this.Write(encoding.GetBytes(data + '\n'));
         }
 
+        // TODO: If we're in file mode, offer a "read" function
         public void Write(byte[] data)
         {
             if (IsConnected)
             {
-                while (writeQueueLength >= maxQueueLength)
+                if (fileModeActive)
                 {
-                    if (!IsConnected)
+                    // If file mode is active, bypass the write queue and just let the stream handle the throttling
+                    // TODO: Make this async
+                    port.Write(data);
+                }
+                else
+                {
+                    while (writeQueueLength >= maxQueueLength)
                     {
-                        // If we lose the connection, just drop the data 
-                        return;
+                        if (!IsConnected)
+                        {
+                            // If we lose the connection, just drop the data 
+                            return;
+                        }
+
+                        Thread.Sleep(1);
                     }
 
-                    Thread.Sleep(1);
+                    writeQueue.Enqueue(data);
+
+                    writeQueueLength += data.Length;
+
+                    // Wake up the write handler
+                    writeCompletion.TrySetResult();
                 }
-
-                writeQueue.Enqueue(data);
-
-                writeQueueLength += data.Length;
-
-                // Wake up the write handler
-                writeCompletion.TrySetResult();
             }
         }
     }
