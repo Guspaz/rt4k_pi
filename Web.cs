@@ -20,6 +20,14 @@ namespace rt4k_pi
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { { "AllowedHosts", "*" } });
             builder.WebHost.UseUrls("http://*:80");
 
+            builder.Logging.ClearProviders();
+            builder.Logging.AddSimpleConsole(options =>
+            {
+                options.IncludeScopes = false;
+                options.SingleLine = true;
+                options.ColorBehavior = Microsoft.Extensions.Logging.Console.LoggerColorBehavior.Disabled;
+            });
+
             var app = builder.Build();
 
             var embeddedProvider = new EmbeddedFileProvider(Assembly.GetExecutingAssembly(), "rt4k_pi");
@@ -35,7 +43,13 @@ namespace rt4k_pi
                 //ServeUnknownFileTypes = true
             });
 
-            var appState = new AppState() { Logger = logger, Serial = Serial, Ser2net = Ser2net, StatusDaemon = StatusDaemon };
+            var appState = new AppState() {
+                Logger = logger,
+                Serial = Serial,
+                Ser2net = Ser2net,
+                StatusDaemon = StatusDaemon,
+                Settings = Settings
+            };
 
             var assembly = Assembly.GetExecutingAssembly();
 
@@ -53,9 +67,12 @@ namespace rt4k_pi
             app.MapGet("/", () => Results.Extensions.RazorSlice<Slices.Status, Slices.AppState>(appState));
             app.MapGet("/Remote", () => Results.Extensions.RazorSlice<Slices.Remote, Slices.AppState>(appState));
             app.MapGet("/Calculator", () => Results.Extensions.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
-            app.MapPost("/RemoteCommand/{cmd}", ([FromRoute] string cmd) => { RT4K?.SendRemoteString(cmd); });
             app.MapGet("/Settings", () => Results.Extensions.RazorSlice<Slices.Settings, Slices.AppState>(appState));
             app.MapGet("/DebugLog", () => Results.Extensions.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
+
+            app.MapPost("/RemoteCommand/{cmd}", ([FromRoute] string cmd) => { RT4K?.SendRemoteString(cmd); });
+            app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => { Settings.UpdateSetting(name, value); });
+
 
             app.Run();
         }

@@ -362,7 +362,10 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-# Custom stuff
+# Dev build scripts (not for github)
 push
 watch
 stop
+
+# App settings from testing
+settings.json

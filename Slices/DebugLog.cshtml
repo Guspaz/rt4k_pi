@@ -12,20 +12,15 @@
     {
         ConsoleColor.Green => "#16c60c",
         ConsoleColor.DarkRed => "#c50f1f",
+        ConsoleColor.DarkGray => "#767676",
         _ => "#cccccc"
     };
-
-    // TODO: Add some sort of actual ansi colour support, but the pre tag will escape it all
-    public string FilterAnsi(string line)
-    {
-        return Regex.Replace(line, "\\[\\d+m", "");
-    }
 }
 
 @* We copy the queue to an array to avoid it changing while iterating due to multithreading *@
 
 <div class="w3-panel w3-card w3-text-white" style="width: 1200px; background-color: #0c0c0c;">
     <pre style="white-space: pre-wrap; word-break: break-word;">
-        @foreach (Logger.LogEntry line in Model.Logger.Log.ToArray()) {<span style="color: @GetColor(line.Color);">@FilterAnsi(line.Entry)</span>}
+        @foreach (Logger.LogEntry line in Model.Logger.Log.ToArray()) {<span style="color: @GetColor(line.Color);">@line.Entry</span>}
     </pre>
 </div>

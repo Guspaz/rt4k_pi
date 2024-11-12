@@ -1,6 +1,5 @@
 /*
  * TODO/ideas list
- * - Persistent settings support
  * - Ability to change SSID/password
  * - Some sort of SVS command support
  * - Pizza button
@@ -9,10 +8,8 @@
  * - WebDAV server (requires serial file IO)
  * - RT4K automated firmware update (requires serial file IO, possibly firmware-related query and update commands)
  * - Web-based firmware renaming/management (requires serial file IO)
- * - Limited ANSI colour support for debug log
  * - Readme page
  * - Support for displaying messages (success/error) at the top of pages
- * - Save remote scaling size in settings
  * - Real power toggling with remote (requires RT4K "get pwr" type command)
  * - Better mobile experience
  */
@@ -29,6 +26,7 @@ namespace rt4k_pi
         public static RT4K? RT4K {get; private set;}
         public static Ser2net? Ser2net {get; private set;}
         public static StatusDaemon StatusDaemon { get; private set; } = new();
+        public static SettingsDaemon Settings { get; private set; } = new();
 
         private static readonly Logger logger = new();
 
@@ -50,6 +48,8 @@ namespace rt4k_pi
 
                 Ser2net.Start();
             }
+
+            Settings.Load();
 
             RunWeb();
         }
