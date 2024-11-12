@@ -12,7 +12,7 @@
  * - Limited ANSI colour support for debug log
  * - Readme page
  * - Support for displaying messages (success/error) at the top of pages
- * - Some options for different virtual remote sizes
+ * - Save remote scaling size in settings
  * - Real power toggling with remote (requires RT4K "get pwr" type command)
  * - Better mobile experience
  */

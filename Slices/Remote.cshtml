@@ -9,8 +9,16 @@
 }
 
 <div>
-    <img style="width: 250px; position: absolute;" src="Static/rt4k_remote.avif" />
-    <img style="width: 250px; position: absolute; opacity: 0%;" src="Static/rt4k_remote_led.png" usemap="#image-map" id="remoteLed" />
+    <img style="width: 0px; position: absolute;" src="Static/rt4k_remote.avif" id="remote" />
+    <img style="width: 0px; position: absolute; opacity: 0%;" src="Static/rt4k_remote_led.png" usemap="#image-map" id="remoteLed" />
+    <div style="position: relative; left: 0px; margin-left: 10px;" id="scaleButtons">
+        <p><button class="w3-btn w3-round-large w3-small w3-light-gray w3-hover-cerulean w3-border w3-border-gray" onclick="handleScale(25); return false;">25%</button></p>
+        <p><button class="w3-btn w3-round-large w3-small w3-light-gray w3-hover-cerulean w3-border w3-border-gray" onclick="handleScale(33); return false;">33%</button></p>
+        <p><button class="w3-btn w3-round-large w3-small w3-light-gray w3-hover-cerulean w3-border w3-border-gray" onclick="handleScale(50); return false;">50%</button></p>
+        <p><button class="w3-btn w3-round-large w3-small w3-light-gray w3-hover-cerulean w3-border w3-border-gray" onclick="handleScale(66); return false;">66%</button></p>
+        <p><button class="w3-btn w3-round-large w3-small w3-light-gray w3-hover-cerulean w3-border w3-border-gray" onclick="handleScale(75); return false;">75%</button></p>
+        <p><button class="w3-btn w3-round-large w3-small w3-light-gray w3-hover-cerulean w3-border w3-border-gray" onclick="handleScale(100); return false;">100%</button></p>
+    </div>
 </div>
 
 <map name="image-map">
@@ -90,9 +98,21 @@
             }
         }, 50);
     }
-</script>
 
-<script>imageMapResize();</script>
+    function handleScale(factor) {
+        const remoteImage = document.getElementById('remote');
+        const ledImage = document.getElementById('remoteLed');
+        const buttonDiv = document.getElementById('scaleButtons');
+
+        remoteImage.style.width = (830 * (factor / 100.0)) + "px";
+        ledImage.style.width = (830 * (factor / 100.0)) + "px";
+        buttonDiv.style.left = (830 * (factor / 100.0)) + "px";
+
+        imageMapResize();
+    }
+
+    handleScale(33);
+</script>
 
 @*
 
