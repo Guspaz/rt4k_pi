@@ -15,6 +15,7 @@
  */
 
 using System.Runtime.InteropServices;
+using FuseDotNet;
 
 namespace rt4k_pi
 {
@@ -47,6 +48,22 @@ namespace rt4k_pi
                 Ser2net = new Ser2net(Serial, 2000);
 
                 Ser2net.Start();
+
+                //Task.Run(() =>
+                //{
+                //    try
+                //    {
+                //        Console.WriteLine("Instantiating FUSE file system");
+                //        var fuseOp = new SerialFsOperations();
+                //        //fuseOp.Mount(["-s", "-d", "serialfs"]);
+                //        fuseOp.Mount(["--help"], new FuseDotNet.Logging.ConsoleLogger());
+                //        Console.WriteLine("FUSE exited");
+                //    }
+                //    catch (Exception ex)
+                //    {
+                //        Console.WriteLine($"FUSE Error ({(ex is PosixException pex ? (int)pex.NativeErrorCode : ex.HResult)}): {ex.Message}");
+                //    }
+                //});
             }
 
             Settings.Load();

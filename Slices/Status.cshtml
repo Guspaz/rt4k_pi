@@ -52,6 +52,7 @@
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         <tr><th style="width: 25%;">rt4k_pi</th><td>v@(rt4k_pi.Program.VERSION)</td></tr>
+        <tr><th>Runtime</th><td>@System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription</td></tr>
         <tr><th>RT4K Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
         <tr><th>IP Address</th><td>@localIP</td></tr>
         <tr><th>Hostname</th><td>@(Model.StatusDaemon.Hostname).local</td></tr>
