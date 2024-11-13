@@ -44,12 +44,18 @@
 
         public void Save()
         {
+            // This class is instantiated before the main class has a chance to do this
+            Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
+
             Console.WriteLine($"Saving settings to {fileName}");
             File.WriteAllText(fileName, JsonSerializer.Serialize(this!, SourceGenerationContext.Default.SettingsDaemon));
         }
 
         public void Load()
         {
+            // This class is instantiated before the main class has a chance to do this
+            Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
+
             Console.WriteLine($"Reading settings from {fileName}");
 
             try

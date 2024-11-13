@@ -13,6 +13,9 @@ namespace rt4k_pi
 
         public StatusDaemon()
         {
+            // This class is instantiated before the main class has a chance to do this
+            Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
+
             Task.Run(async () =>
             {
                 while (!cts.IsCancellationRequested)

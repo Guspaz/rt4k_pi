@@ -5,7 +5,7 @@
  * - Pizza button
  * - Auto-update support
  * - Backup settings to RT4K (requires serial file IO)
- * - WebDAV server (requires serial file IO)
+ * - SMB/CIFS support (requires serial file IO)
  * - RT4K automated firmware update (requires serial file IO, possibly firmware-related query and update commands)
  * - Web-based firmware renaming/management (requires serial file IO)
  * - Readme page
@@ -31,6 +31,12 @@ namespace rt4k_pi
 
         private static readonly Logger logger = new();
 
+        static Program()
+        {
+            // Ensure that we have the right working directory from the start (may get defaulted to root)
+            Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
+        }
+
         public static void Main()
         {
             // Run all output through the debug log
@@ -49,21 +55,21 @@ namespace rt4k_pi
 
                 Ser2net.Start();
 
-                //Task.Run(() =>
-                //{
-                //    try
-                //    {
-                //        Console.WriteLine("Instantiating FUSE file system");
-                //        var fuseOp = new SerialFsOperations();
-                //        //fuseOp.Mount(["-s", "-d", "serialfs"]);
-                //        fuseOp.Mount(["--help"], new FuseDotNet.Logging.ConsoleLogger());
-                //        Console.WriteLine("FUSE exited");
-                //    }
-                //    catch (Exception ex)
-                //    {
-                //        Console.WriteLine($"FUSE Error ({(ex is PosixException pex ? (int)pex.NativeErrorCode : ex.HResult)}): {ex.Message}");
-                //    }
-                //});
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        Console.WriteLine("Instantiating FUSE file system");
+                        var fuseOp = new SerialFsOperations();
+                        // TODO: This is running single threaded, should it? May be higher performance if not.
+                        fuseOp.Mount(["rt4k_pi", "-s", "-d", "serialfs"], new FuseDotNet.Logging.ConsoleLogger());
+                        Console.WriteLine("FUSE exited");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FUSE Error ({(ex is PosixException pex ? (int)pex.NativeErrorCode : ex.HResult)}): {ex.Message}");
+                    }
+                });
             }
 
             Settings.Load();

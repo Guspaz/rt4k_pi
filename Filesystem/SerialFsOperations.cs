@@ -4,6 +4,20 @@ namespace rt4k_pi
 {
     internal class SerialFsOperations : IFuseOperations
     {
+        public SerialFsOperations()
+        {
+            Console.WriteLine("Doing setup for FUSE");
+            Util.RunCommand("ln", "-sf /usr/lib/aarch64-linux-gnu/libfuse3.so.3 libfuse3.so");
+            try { Util.RunCommand("umount", "-f serialfs"); } catch { }
+            Util.RunCommand("mkdir", "-p serialfs");
+        }
+
+        ~SerialFsOperations()
+        {
+            Console.WriteLine("Shutting down FUSE");
+            try { Util.RunCommand("umount", "-f serialfs"); } catch { }
+        }
+
         public void Dispose() => Console.WriteLine("Disposing FUSE file system");
 
         public PosixResult StatFs(ReadOnlyFuseMemory<byte> fileNamePtr, out FuseVfsStat statvfs)

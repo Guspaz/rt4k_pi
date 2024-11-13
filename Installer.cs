@@ -19,7 +19,7 @@ namespace rt4k_pi
             sb.AppendLine("Type=simple");
             sb.AppendLine("Restart=always");
             sb.AppendLine("RestartSec=1");
-            sb.AppendLine("ExecStart=/home/pi/rt4k_pi");
+            sb.AppendLine($"ExecStart={Directory.GetCurrentDirectory()}/rt4k_pi");
             sb.AppendLine("");
             sb.AppendLine("[Install]");
             sb.AppendLine("WantedBy=multi-user.target");
