@@ -10,5 +10,7 @@ namespace rt4k_pi.Slices
         public required Logger Logger { get; set; }
         public required StatusDaemon StatusDaemon { get; set; }
         public required SettingsDaemon Settings { get; set; }
+
+        public string? Command { get; set; }
     }
 }

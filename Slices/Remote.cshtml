@@ -2,10 +2,13 @@
 @implements IUsesLayout<_Layout, LayoutModel>
 
 @functions {
-    public LayoutModel LayoutModel => new() {
-        Title = "Remote",
-        ExtraHeaders = new("<script src='/Static/imageMapResizer.min.js'></script>")
-    };
+    public LayoutModel LayoutModel => new() { Title = "Remote" };
+
+    protected override Task ExecuteSectionAsync(string name)
+    {
+        if (name == "ExtraHeaders") { <script src='/Static/imageMapResizer.min.js'></script> }
+        return Task.CompletedTask;
+    }
 }
 
 <div>

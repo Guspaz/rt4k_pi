@@ -2,7 +2,29 @@
 @implements IUsesLayout<_Layout, LayoutModel>
 
 @functions {
-    public LayoutModel LayoutModel => new() { Title = "Settings" };
+    public LayoutModel LayoutModel
+    {
+        get
+        {
+            string error = "";
+            // TODO: Look into moving this to an async section render
+            if (Model.Command == "CheckUpdates")
+            {
+                var latestVersion = Installer.CheckUpdate();
+
+                if (!string.IsNullOrWhiteSpace(latestVersion))
+                {
+                    Model.Settings.LatestVersion = latestVersion;
+                }
+                else
+                {
+                    error = "Unable to get update information";
+                }
+            }
+
+            return new() { Title = "Settings", Error = error };
+        }
+    }
 }
 
 <h2>Updates</h2>
@@ -10,7 +32,7 @@
 <div class="w3-panel">
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         <tr><th>Current version:</th><td>@(rt4k_pi.Program.VERSION)</td></tr>
-        <tr><th>Latest version:</th><td>@Model.Settings.LatestVersion&nbsp;&nbsp;<button class="@LayoutModel.ButtonClasses" onclick="return false;" type="button">Check for updates</button>&nbsp;<button class="@LayoutModel.ButtonClasses" onclick="return false;" type="button">Install update</button></td></tr>
+        <tr><th>Latest version:</th><td>@Model.Settings.LatestVersion&nbsp;&nbsp;<a class="@LayoutModel.ButtonClasses" href="/Settings/CheckUpdates">Check for updates</a>&nbsp;<a class="@LayoutModel.ButtonClasses" href="">Install update</a></td></tr>
     </table>
 </div>
 

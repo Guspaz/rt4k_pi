@@ -2,11 +2,13 @@
 @implements IUsesLayout<_Layout, LayoutModel>
 
 @functions {
-    public LayoutModel LayoutModel => new()
-        {
-            Title = "Video Timings Calculator",
-            ExtraHeaders = new("<script src='Static/jquery-3.4.1.min.js'></script><script src='Static/dmt_timings.js'></script><script src='Static/vic_timings.js'></script>")
-        };
+    public LayoutModel LayoutModel => new() { Title = "Video Timings Calculator" };
+
+    protected override Task ExecuteSectionAsync(string name)
+    {
+        if (name == "ExtraHeaders") { <script src='Static/jquery-3.4.1.min.js'></script><script src='Static/dmt_timings.js'></script><script src='Static/vic_timings.js'></script> }
+        return Task.CompletedTask;
+    }
 }
 
 <script>

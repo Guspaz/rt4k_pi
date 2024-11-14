@@ -45,5 +45,18 @@ namespace rt4k_pi
                 Console.WriteLine("Already running under SystemD");
             }
         }
+
+        public static string CheckUpdate()
+        {
+            try
+            {
+                return new HttpClient().GetStringAsync("https://guspaz.github.io/rt4k.version").Result.Split('@')[0];
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in CheckUpdate: {ex.Message}");
+                return "";
+            }
+        }
     }
 }
