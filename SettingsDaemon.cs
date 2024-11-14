@@ -19,6 +19,13 @@
             set => SetProperty(ref _RemoteScale, value);
         }
 
+        private string _LatestVersion = Program.VERSION;
+        public string LatestVersion
+        {
+            get => _LatestVersion;
+            set => SetProperty(ref _LatestVersion, value);
+        }
+
         private void SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
         {
             // Bypass logic if we're not yet loaded, or were maybe instantiated by the json deserializer

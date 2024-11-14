@@ -5,6 +5,15 @@
     public LayoutModel LayoutModel => new() { Title = "Settings" };
 }
 
+<h2>Updates</h2>
+
+<div class="w3-panel">
+    <table class='w3-table-all w3-card' style='max-width: 700px;'>
+        <tr><th>Current version:</th><td>@(rt4k_pi.Program.VERSION)</td></tr>
+        <tr><th>Latest version:</th><td>@Model.Settings.LatestVersion&nbsp;&nbsp;<button class="@LayoutModel.ButtonClasses" onclick="return false;" type="button">Check for updates</button>&nbsp;<button class="@LayoutModel.ButtonClasses" onclick="return false;" type="button">Install update</button></td></tr>
+    </table>
+</div>
+
 <h2>Services</h2>
 
 <div class='w3-panel'>

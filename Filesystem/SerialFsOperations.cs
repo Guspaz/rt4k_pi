@@ -1,6 +1,6 @@
 ﻿using FuseDotNet;
 
-namespace rt4k_pi
+namespace rt4k_pi.Filesystem
 {
     internal class SerialFsOperations : IFuseOperations
     {
@@ -14,11 +14,15 @@ namespace rt4k_pi
 
         ~SerialFsOperations()
         {
+            Dispose();
+        }
+
+        public void Dispose()
+        {
+            GC.SuppressFinalize(this);
             Console.WriteLine("Shutting down FUSE");
             try { Util.RunCommand("umount", "-f serialfs"); } catch { }
         }
-
-        public void Dispose() => Console.WriteLine("Disposing FUSE file system");
 
         public PosixResult StatFs(ReadOnlyFuseMemory<byte> fileNamePtr, out FuseVfsStat statvfs)
         {

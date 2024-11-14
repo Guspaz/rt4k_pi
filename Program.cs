@@ -4,14 +4,15 @@
  * - Some sort of SVS command support
  * - Pizza button
  * - Auto-update support
+ * - Readme page
+ * - Support for displaying messages (success/error) at the top of pages
  * - Backup settings to RT4K (requires serial file IO)
  * - SMB/CIFS support (requires serial file IO)
  * - RT4K automated firmware update (requires serial file IO, possibly firmware-related query and update commands)
  * - Web-based firmware renaming/management (requires serial file IO)
- * - Readme page
- * - Support for displaying messages (success/error) at the top of pages
  * - Real power toggling with remote (requires RT4K "get pwr" type command)
  * - Better mobile experience
+ * - Generally better error checking/handling/tolerance
  */
 
 using System.Runtime.InteropServices;
@@ -60,7 +61,7 @@ namespace rt4k_pi
                     try
                     {
                         Console.WriteLine("Instantiating FUSE file system");
-                        var fuseOp = new SerialFsOperations();
+                        var fuseOp = new Filesystem.SerialFsOperations();
                         // TODO: This is running single threaded, should it? May be higher performance if not.
                         fuseOp.Mount(["rt4k_pi", "-s", "-d", "serialfs"], new FuseDotNet.Logging.ConsoleLogger());
                         Console.WriteLine("FUSE exited");
