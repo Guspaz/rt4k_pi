@@ -27,8 +27,9 @@ namespace rt4k_pi
         public static Serial? Serial {get; private set;}
         public static RT4K? RT4K {get; private set;}
         public static Ser2net? Ser2net {get; private set;}
-        public static StatusDaemon StatusDaemon { get; private set; } = new();
-        public static SettingsDaemon Settings { get; private set; } = new();
+        public static StatusDaemon StatusDaemon { get; } = new();
+        public static SettingsDaemon Settings { get; } = new();
+        public static Installer Installer { get; } = new();
 
         private static readonly Logger logger = new();
 
@@ -48,7 +49,7 @@ namespace rt4k_pi
             // We don't actually support Windows, but it's useful for testing.
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                new Installer().DoInstall();
+                Installer.CheckInstall();
 
                 Serial = new Serial(115200);
                 RT4K = new RT4K(Serial);
