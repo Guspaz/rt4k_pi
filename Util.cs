@@ -6,6 +6,11 @@ public class Util
 {
     public static string RunCommand(string FileName, string Arguments = "")
     {
+        if (Program.Settings.VerboseLogging)
+        {
+            Console.WriteLine($"exec: {FileName} {Arguments}");
+        }
+
         var process = new Process
         {
             StartInfo = new ProcessStartInfo

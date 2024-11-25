@@ -26,6 +26,13 @@ public partial class SettingsDaemon
         set => SetProperty(ref _LatestVersion, value);
     }
 
+    private bool _VerboseLogging = false;
+    public bool VerboseLogging
+    {
+        get => _VerboseLogging;
+        set => SetProperty(ref _VerboseLogging, value);
+    }
+
     private void SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
     {
         // Bypass logic if we're not yet loaded, or were maybe instantiated by the json deserializer

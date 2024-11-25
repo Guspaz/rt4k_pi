@@ -1,5 +1,8 @@
 /*
  * TODO/ideas list
+ * - Checkboxes on settings page do something
+ * - Refresh settings page after update
+ * - Fix update page URL to not stay stuck on DoUpdate
  * - Ability to change SSID/password
  * - Some sort of SVS command support
  * - Pizza button
@@ -40,6 +43,8 @@ public partial class Program
 
     public static void Main()
     {
+        Console.WriteLine("Starting up rt4k_pi");
+
         // Run all output through the debug log
         Console.SetOut(logger);
         

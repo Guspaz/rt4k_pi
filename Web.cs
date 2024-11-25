@@ -37,12 +37,14 @@ public partial class Program
             //ServeUnknownFileTypes = true
         });
 
-        var appState = new AppState() {
+        var appState = new AppState()
+        {
             Logger = logger,
             Serial = Serial,
             Ser2net = Ser2net,
             StatusDaemon = StatusDaemon,
-            Settings = Settings
+            Settings = Settings,
+            Installer = Installer
         };
 
         var assembly = Assembly.GetExecutingAssembly();
@@ -64,6 +66,10 @@ public partial class Program
         app.MapGet("/Settings/{cmd?}", ([FromRoute] string? cmd) => { appState.Command = cmd; return Results.Extensions.RazorSlice<Slices.Settings, Slices.AppState>(appState); });
         app.MapGet("/DebugLog", () => Results.Extensions.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
 
+        // APIs
+        app.MapGet("/GetUpdateStatus", () => Installer.GetStatus());
+
+        // Commands
         app.MapPost("/RemoteCommand/{cmd}", ([FromRoute] string cmd) => RT4K?.SendRemoteString(cmd) );
         app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value) );
 

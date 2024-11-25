@@ -48,6 +48,20 @@ public class Installer
         }
     }
 
+    public string GetStatus()
+    {
+        if (Updating)
+        {
+            return $"{UpdateProgress}%";
+        }
+        else if (!string.IsNullOrWhiteSpace(UpdateError))
+        {
+            return UpdateError;
+        }
+
+        return "Idle";
+    }
+
     private static void DoInstall()
     {
         Util.RunCommand("systemctl", "enable rt4k");
@@ -72,6 +86,14 @@ public class Installer
 
     public void DoUpdate()
     {
+        if (Updating)
+        {
+            return;
+        }
+
+        // For some reason, this isn't set?
+        Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
+
         Updating = true;
 
         Console.WriteLine("Update triggered");
@@ -99,7 +121,7 @@ public class Installer
                 Console.WriteLine($"Download size: {length} bytes");
 
                 using var downloadStream = await download.Content.ReadAsStreamAsync();
-                using var fileStream = new FileStream("updateFile", FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
+                using var fileStream = new FileStream("updateFile.7z", FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
                 using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     
                 var buffer = new byte[8192];
@@ -121,13 +143,16 @@ public class Installer
                     SetUpdateError("Update hash mismatch");
                     return;
                 }
+
+                await fileStream.FlushAsync();
                         
                 Console.WriteLine("Download succesful, update hash matches");
 
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 {
-                    Console.WriteLine("Replacing executable");
-                    File.Move("updateFile", "rt4k_pi", true);
+                    Console.WriteLine("Extracting update");
+                    Util.RunCommand("7zr", "x -y updateFile.7z");
+                    Util.RunCommand("chmod", "+x rt4k_pi");
                     Console.WriteLine("Restarting service with new executable");
                     DoInstall();
                 }

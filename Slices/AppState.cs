@@ -10,6 +10,7 @@ public class AppState
     public required Logger Logger { get; set; }
     public required StatusDaemon StatusDaemon { get; set; }
     public required SettingsDaemon Settings { get; set; }
+    public required Installer Installer { get; set; }
 
     public string? Command { get; set; }
 }

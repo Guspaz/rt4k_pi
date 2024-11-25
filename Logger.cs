@@ -17,6 +17,7 @@ public class Logger : TextWriter
     {
         // Store the old color and reset it, we'll use ANSI codes for the actual output
         var oldColor = Console.ForegroundColor;
+        bool isVerboseLog = false;
         Console.ResetColor();
 
         // Prepare our log entry
@@ -28,6 +29,7 @@ public class Logger : TextWriter
             // Special case, dim ASP.NET log stuff
             entryColor = ConsoleColor.DarkGray;
             oldOut.Write("\x1B[39m\x1B[2m"); // Default color, dim
+            isVerboseLog = true;
         }
         else
         {
@@ -40,12 +42,18 @@ public class Logger : TextWriter
             });
         }
 
-        // Write to the original console
-        oldOut.Write(buffer, index, count);
+        if (!isVerboseLog || Program.Settings.VerboseLogging)
+        {
+            // Write to the original console
+            oldOut.Write(buffer, index, count);
 
-        // Append to our debug log
-        Log.Enqueue(new(entryText, entryColor));
-        logSize += count;
+            // Get the console back to how it was before
+            oldOut.Write("\x1B[0m"); // Reset
+
+            // Append to our debug log
+            Log.Enqueue(new(entryText, entryColor));
+            logSize += count;
+        }
 
         // Keep the queue under the max size
         while (logSize > QUEUE_SIZE)
@@ -54,7 +62,6 @@ public class Logger : TextWriter
         }
 
         // Get the console back to how it was before
-        oldOut.Write("\x1B[0m"); // Reset
         Console.ForegroundColor = oldColor;
     }
 }
