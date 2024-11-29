@@ -68,6 +68,7 @@ public partial class Program
 
         // APIs
         app.MapGet("/GetUpdateStatus", () => Installer.GetStatus());
+        app.MapGet("/CheckUpdates", () => Installer.CheckUpdate());
 
         // Commands
         app.MapGet("/SendSerial", ([FromQuery] string cmd) => Serial?.WriteLine(cmd));

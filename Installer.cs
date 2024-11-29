@@ -75,7 +75,7 @@ public class Installer
     {
         try
         {
-            return new HttpClient().GetStringAsync("https://guspaz.github.io/rt4k.version").Result.Split('@')[0].Trim();
+            return Program.Settings.LatestVersion = new HttpClient().GetStringAsync("https://guspaz.github.io/rt4k.version").Result.Split('@')[0].Trim();
         }
         catch (Exception ex)
         {
