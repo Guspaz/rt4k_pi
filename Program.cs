@@ -2,7 +2,7 @@
  * TODO/ideas list
  * - Checkboxes on settings page do something
  * - Refresh settings page after update
- * - Fix update page URL to not stay stuck on DoUpdate
+ * - Fix update page URL to not stay stuck on DoUpdate (also maybe move more to async jscript)
  * - Ability to change SSID/password
  * - Some sort of SVS command support
  * - Pizza button
@@ -15,6 +15,7 @@
  * - Real power toggling with remote (requires RT4K "get pwr" type command)
  * - Better mobile experience
  * - Generally better error checking/handling/tolerance
+ * - Look into generating minimal images with pi-gen-micro
  */
 
 namespace rt4k_pi;

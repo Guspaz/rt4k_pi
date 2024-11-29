@@ -70,6 +70,7 @@ public partial class Program
         app.MapGet("/GetUpdateStatus", () => Installer.GetStatus());
 
         // Commands
+        app.MapGet("/SendSerial", ([FromQuery] string cmd) => Serial?.WriteLine(cmd));
         app.MapPost("/RemoteCommand/{cmd}", ([FromRoute] string cmd) => RT4K?.SendRemoteString(cmd) );
         app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value) );
 
