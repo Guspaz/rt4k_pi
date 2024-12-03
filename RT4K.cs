@@ -4,8 +4,8 @@ namespace rt4k_pi;
 
 public class RT4K
 {
-    private PowerState powerState = PowerState.Unknown;
-    private PowerState expectedPowerState = PowerState.Unknown;
+    public PowerState Power { get; private set; } = PowerState.Unknown;
+    private PowerState expectedPower = PowerState.Unknown;
     private Serial serial;
 
     public RT4K(Serial serial)
@@ -20,12 +20,12 @@ public class RT4K
         if (data.StartsWith("[MCU] Boot Sequence Complete..."))
         {
             Console.WriteLine("Detected RT4K startup");
-            powerState = expectedPowerState = PowerState.On;
+            Power = expectedPower = PowerState.On;
         }
         else if (data.StartsWith("[MCU] Entering Sleep Mode"))
         {
             Console.WriteLine("Detected RT4K shutdown");
-            powerState = expectedPowerState = PowerState.Off;
+            Power = expectedPower = PowerState.Off;
         }
     }
 
@@ -152,13 +152,13 @@ public class RT4K
             if (remote == Remote.Power)
             {
                 // Try to recover if we've gotten out of sync
-                if (powerState != expectedPowerState)
+                if (Power != expectedPower)
                 {
                     Console.WriteLine("Unexpected RT4K power state, setting state to unknown");
-                    powerState = PowerState.Unknown;
+                    Power = PowerState.Unknown;
                 }
 
-                switch (powerState)
+                switch (Power)
                 {
                     case PowerState.Unknown:
                         TurnOff();
@@ -189,13 +189,13 @@ public class RT4K
 
     public void TurnOn()
     {
-        expectedPowerState = PowerState.On;
+        expectedPower = PowerState.On;
         serial.WriteLine("pwr on");
     }
 
     public void TurnOff()
     {
-        expectedPowerState = PowerState.Off;
+        expectedPower = PowerState.Off;
         SendRemote(Remote.Power);
     }
 }

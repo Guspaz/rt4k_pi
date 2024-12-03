@@ -44,7 +44,8 @@ public partial class Program
             Ser2net = Ser2net,
             StatusDaemon = StatusDaemon,
             Settings = Settings,
-            Installer = Installer
+            Installer = Installer,
+            RT4K = RT4K
         };
 
         var assembly = Assembly.GetExecutingAssembly();

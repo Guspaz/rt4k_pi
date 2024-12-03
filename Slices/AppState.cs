@@ -7,6 +7,7 @@ public class AppState
     public bool IsLinux { get; } = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
     public Serial? Serial { get; set; }
     public Ser2net? Ser2net { get; set; }
+    public RT4K? RT4K { get; set; }
     public required Logger Logger { get; set; }
     public required StatusDaemon StatusDaemon { get; set; }
     public required SettingsDaemon Settings { get; set; }
