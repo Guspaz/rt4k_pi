@@ -16,6 +16,7 @@
  * - Better mobile experience
  * - Generally better error checking/handling/tolerance
  * - Look into generating minimal images with pi-gen-micro
+ * - Investigate dim colours on first power on in log
  */
 
 namespace rt4k_pi;

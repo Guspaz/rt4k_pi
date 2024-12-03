@@ -1,8 +1,43 @@
-﻿namespace rt4k_pi;
+﻿using System.Text;
 
-public class RT4K(Serial serial)
+namespace rt4k_pi;
+
+public class RT4K
 {
-    private bool lastPowerState = false;
+    private PowerState powerState = PowerState.Unknown;
+    private PowerState expectedPowerState = PowerState.Unknown;
+    private Serial serial;
+
+    public RT4K(Serial serial)
+    {
+        this.serial = serial;
+        serial.RegisterReader(HandleRead);
+    }
+
+    private void HandleRead(byte[] data)
+    {
+        // TODO: Consider a string version of serial.RegisterReader that can cache the string representation
+        string readData = Encoding.ASCII.GetString(data);
+
+        // Update known power state based on observed serial output
+        if (readData.StartsWith("[MCU] Boot Sequence Complete..."))
+        {
+            Console.WriteLine("Detected RT4K startup");
+            powerState = expectedPowerState = PowerState.On;
+        }
+        else if (readData.StartsWith("[MCU] Entering Sleep Mode"))
+        {
+            Console.WriteLine("Detected RT4K shutdown");
+            powerState = expectedPowerState = PowerState.Off;
+        }
+    }
+
+    public enum PowerState
+    {
+        On,
+        Off,
+        Unknown
+    }
 
     public enum Remote
     {
@@ -116,15 +151,28 @@ public class RT4K(Serial serial)
     {
         if (Enum.TryParse(remoteString, true, out Remote remote))
         {
-            // TODO: Proper power toggling support (query RT4K instead of lastPowerState)
+            // TODO: Replace power state detection with query when available
             if (remote == Remote.Power)
             {
-                lastPowerState = !lastPowerState;
-
-                if (lastPowerState) // Inverted
+                // Try to recover if we've gotten out of sync
+                if (powerState != expectedPowerState)
                 {
-                    TurnOn();
-                    return;
+                    powerState = PowerState.Unknown;
+                }
+
+                switch (powerState)
+                {
+                    case PowerState.Unknown:
+                        TurnOff();
+                        Task.Delay(500).Wait();
+                        TurnOn();
+                        return;
+                    case PowerState.Off:
+                        TurnOn();
+                        return;
+                    case PowerState.On:
+                        TurnOff();
+                        return;
                 }
             }
 
@@ -143,6 +191,13 @@ public class RT4K(Serial serial)
 
     public void TurnOn()
     {
+        expectedPowerState = PowerState.On;
         serial.WriteLine("pwr on");
+    }
+
+    public void TurnOff()
+    {
+        expectedPowerState = PowerState.Off;
+        SendRemote(Remote.Power);
     }
 }
