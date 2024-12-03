@@ -12,6 +12,7 @@ public class Serial
 
     private FileStream port = new("/dev/null", FileMode.Open);
     private readonly HashSet<Action<byte[]>> readers = [];
+    private readonly HashSet<Action<string>> stringReaders = [];
     private readonly Encoding encoding = Encoding.ASCII;
     private readonly CancellationTokenSource cts = new();
     private readonly Queue<byte[]> writeQueue = new();
@@ -148,10 +149,13 @@ public class Serial
         }
     }
 
+    // TODO: Support file mode
     private async void HandleRead()
     {
         Console.WriteLine("Starting serial read loop");
         byte[] readBuf = new byte[4096];
+        StringBuilder lineBuffer = new();
+
         while (!cts.Token.IsCancellationRequested)
         {
             if (IsConnected)
@@ -172,10 +176,13 @@ public class Serial
 
                 if (read > 0)
                 {
+                    string receivedData = encoding.GetString(readBuf, 0, read);
+                    lineBuffer.Append(receivedData);
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.Write(encoding.GetString(readBuf, 0, read));
+                    Console.Write(receivedData);
                     Console.ResetColor();
 
+                    // Process byte readers
                     foreach (Action<byte[]> action in readers)
                     {
                         try
@@ -185,6 +192,33 @@ public class Serial
                         catch (Exception ex)
                         {
                             Console.WriteLine($"Warning: error calling registered reader: {ex.Message}");
+                        }
+                    }
+
+                    // Some safety precautions
+                    if (lineBuffer.Length > 32768)
+                    {
+                        Console.WriteLine("Warning: Serial read buffer exceeded 32K, purging read buffer");
+                        lineBuffer.Clear();
+                    }
+
+                    int newlineIndex;
+                    while ((newlineIndex = lineBuffer.ToString().IndexOf('\n')) != -1)
+                    {
+                        string completeLine = lineBuffer.ToString(0, newlineIndex).TrimEnd('\r');
+                        lineBuffer.Remove(0, newlineIndex + 1);
+
+                        // Process string readers
+                        foreach (Action<string> stringAction in stringReaders)
+                        {
+                            try
+                            {
+                                stringAction(completeLine);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Warning: error calling registered string reader: {ex.Message}");
+                            }
                         }
                     }
                 }
@@ -197,8 +231,10 @@ public class Serial
     }
 
     public void RegisterReader(Action<byte[]> reader) => readers.Add(reader);
+    public void RegisterReader(Action<string> reader) => stringReaders.Add(reader);
 
     public void UnregisterReader(Action<byte[]> reader) => readers.Remove(reader);
+    public void UnregisterReader(Action<string> reader) => stringReaders.Remove(reader);
 
     public void WriteLine(string data)
     {

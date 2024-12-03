@@ -14,18 +14,15 @@ public class RT4K
         serial.RegisterReader(HandleRead);
     }
 
-    private void HandleRead(byte[] data)
+    private void HandleRead(string data)
     {
-        // TODO: Consider a string version of serial.RegisterReader that can cache the string representation
-        string readData = Encoding.ASCII.GetString(data);
-
         // Update known power state based on observed serial output
-        if (readData.StartsWith("[MCU] Boot Sequence Complete..."))
+        if (data.StartsWith("[MCU] Boot Sequence Complete..."))
         {
             Console.WriteLine("Detected RT4K startup");
             powerState = expectedPowerState = PowerState.On;
         }
-        else if (readData.StartsWith("[MCU] Entering Sleep Mode"))
+        else if (data.StartsWith("[MCU] Entering Sleep Mode"))
         {
             Console.WriteLine("Detected RT4K shutdown");
             powerState = expectedPowerState = PowerState.Off;
@@ -157,6 +154,7 @@ public class RT4K
                 // Try to recover if we've gotten out of sync
                 if (powerState != expectedPowerState)
                 {
+                    Console.WriteLine("Unexpected RT4K power state, setting state to unknown");
                     powerState = PowerState.Unknown;
                 }
 
