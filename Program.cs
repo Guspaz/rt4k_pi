@@ -12,7 +12,6 @@
  * - SMB/CIFS support (requires serial file IO)
  * - RT4K automated firmware update (requires serial file IO, possibly firmware-related query and update commands)
  * - Web-based firmware renaming/management (requires serial file IO)
- * - Real power toggling with remote (requires RT4K "get pwr" type command)
  * - Better mobile experience
  * - Generally better error checking/handling/tolerance
  * - Look into generating minimal images with pi-gen-micro
