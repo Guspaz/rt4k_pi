@@ -26,9 +26,12 @@ public class Logger : TextWriter
 
         if (entryText.StartsWith("info: "))
         {
-            // Special case, dim ASP.NET log stuff
-            entryColor = ConsoleColor.DarkGray;
-            oldOut.Write("\x1B[39m\x1B[2m"); // Default color, dim
+            if (Program.Settings.VerboseLogging)
+            {
+                // Special case, dim ASP.NET log stuff
+                entryColor = ConsoleColor.DarkGray;
+                oldOut.Write("\x1B[39m\x1B[2m"); // Default color, dim
+            }
             isVerboseLog = true;
         }
         else
