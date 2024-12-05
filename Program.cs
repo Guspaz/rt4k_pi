@@ -1,12 +1,9 @@
 /*
  * TODO/ideas list
  * - Checkboxes on settings page do something
- * - Refresh settings page after update
- * - Fix update page URL to not stay stuck on DoUpdate (also maybe move more to async jscript)
  * - Ability to change SSID/password
  * - Some sort of SVS command support
  * - Pizza button
- * - Auto-update support
  * - Readme page
  * - Backup settings to RT4K (requires serial file IO)
  * - SMB/CIFS support (requires serial file IO)

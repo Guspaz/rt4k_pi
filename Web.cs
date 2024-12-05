@@ -64,7 +64,7 @@ public partial class Program
         app.MapGet("/", () => Results.Extensions.RazorSlice<Slices.Status, Slices.AppState>(appState));
         app.MapGet("/Remote", () => Results.Extensions.RazorSlice<Slices.Remote, Slices.AppState>(appState));
         app.MapGet("/Calculator", () => Results.Extensions.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
-        app.MapGet("/Settings/{cmd?}", ([FromRoute] string? cmd) => { appState.Command = cmd; return Results.Extensions.RazorSlice<Slices.Settings, Slices.AppState>(appState); });
+        app.MapGet("/Settings", () => Results.Extensions.RazorSlice<Slices.Settings, Slices.AppState>(appState));
         app.MapGet("/DebugLog", () => Results.Extensions.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
 
         // APIs
@@ -75,6 +75,7 @@ public partial class Program
         app.MapGet("/SendSerial", ([FromQuery] string cmd) => Serial?.WriteLine(cmd));
         app.MapPost("/RemoteCommand/{cmd}", ([FromRoute] string cmd) => RT4K?.SendRemoteString(cmd) );
         app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value) );
+        app.MapPost("/InstallUpdate", () => Installer.DoUpdate());
 
         app.Run();
     }

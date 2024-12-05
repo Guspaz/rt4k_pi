@@ -86,7 +86,12 @@ public class Installer
 
     public void DoUpdate()
     {
-        if (Updating)
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            SetUpdateError("Unable to update on Windows");
+            return;
+        }
+        else if (Updating)
         {
             return;
         }
