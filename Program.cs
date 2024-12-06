@@ -56,7 +56,10 @@ public partial class Program
             RT4K = new RT4K(Serial);
             Ser2net = new Ser2net(Serial, 2000);
 
-            Ser2net.Start();
+            if (Settings.EnableSer2net)
+            {
+                Ser2net.Start();
+            }
 
             Task.Run(() =>
             {

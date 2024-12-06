@@ -50,15 +50,12 @@
         }
     }
 
-
-    const url = "/GetUpdateStatus";
-
     // Function to update table cell content
     async function updateTableCell() {
         const statusElement = document.getElementById("updateStatus");
 
         try {
-            const response = await fetch(url);
+            const response = await fetch("/GetUpdateStatus");
             if (!response.ok) {
                 throw new Error("Network response was not ok");
             }
@@ -88,9 +85,31 @@
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">WebDAV</th><td><input class="w3-check" id="enable_webdav" type="checkbox" disabled /> <label for="enable_webdav">Enable</label></td></tr>
-        <tr><th>ser2net</th><td><input class="w3-check" id="enable_ser2net" type="checkbox" checked disabled/> <label for="enable_ser2net">Enable</label></td></tr>
-        <tr><th>Log web requests</th><td><input class="w3-check" id="log_webrequests" type="checkbox" checked disabled /> <label for="log_webrequests">Enable</label></td></tr>
-        <tr><th>Pizza</th><td><input class="w3-check" id="enable_pizza" type="checkbox" checked disabled /> <label for="enable_ser2net">Enable</label></td></tr>
+        <tr><th style="width: 25%;">SMB/CIFS</th><td><input class="w3-check" id="enableSmb" type="checkbox" disabled /> <label for="enableSmb">Enable</label></td></tr>
+        <tr><th>ser2net</th><td><input class="w3-check" id="EnableSer2net" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.EnableSer2net ? "checked" : "") /> <label for="EnableSer2net">Enable</label></td></tr>
+        <tr><th>Pizza</th><td><input class="w3-check" id="enablePizza" type="checkbox" checked disabled /> <label for="enablePizza">Enable</label></td></tr>
     </table>
 </div>
+
+<h2>Settings</h2>
+
+<div class='w3-panel'>
+    <table class='w3-table-all w3-card' style='max-width: 700px;'>
+        <tr><th style="width: 25%;">Verbose logging</th><td><input class="w3-check" id="VerboseLogging" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.VerboseLogging ? "checked" : "") /> <label for="VerboseLogging">Enable</label></td></tr>
+    </table>
+</div>
+
+<script>
+    async function sendCheckboxState(checkbox) {
+        try {
+            const response = await fetch(`/UpdateSetting/${checkbox.id}/${checkbox.checked}`, { method: 'POST' });
+            if (!response.ok)
+            {
+                throw new Error ("Network response was not ok");
+            }
+        } catch (error) {
+            console.error("Error updating checkbox", error);
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+</script>

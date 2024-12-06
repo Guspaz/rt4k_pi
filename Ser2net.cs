@@ -38,6 +38,7 @@ public class Ser2net(Serial serial, int Port)
 
     public void Stop()
     {
+        Console.WriteLine("Shutting down ser2net");
         cts.Cancel();
         listener.Stop();
     }

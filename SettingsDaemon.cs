@@ -33,8 +33,27 @@ public partial class SettingsDaemon
         set => SetProperty(ref _VerboseLogging, value);
     }
 
+    private bool _EnableSer2net = true;
+    public bool EnableSer2net
+    {
+        get => _EnableSer2net;
+        set {
+            if (!EnableSer2net && value)
+            {
+                Program.Ser2net?.Start();
+            }
+            else if (EnableSer2net && !value)
+            {
+                Program.Ser2net?.Stop();
+            }
+
+            SetProperty(ref _EnableSer2net, value);
+        }
+    }
+
     private void SetProperty<T>(ref T field, T value, [CallerMemberName] string propertyName = "")
     {
+        // TODO: Some sort of setting change subscription system?
         // Bypass logic if we're not yet loaded, or were maybe instantiated by the json deserializer
         if (!isLoaded)
         {
@@ -96,7 +115,7 @@ public partial class SettingsDaemon
         isLoaded = true;
     }
 
-    public void UpdateSetting(string name, string value)
+    public IResult UpdateSetting(string name, string value)
     {
         // Get the property by name
         var property = GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
@@ -104,7 +123,7 @@ public partial class SettingsDaemon
         if (property == null)
         {
             Console.WriteLine($"Error: Property '{name}' does not exist.");
-            return;
+            return Results.BadRequest();
         }
 
         try
@@ -118,7 +137,10 @@ public partial class SettingsDaemon
         catch (Exception ex)
         {
             Console.WriteLine($"Error: Failed to update '{name}': {ex.Message}");
+            return Results.InternalServerError();
         }
+
+        return Results.Ok();
     }
 }
 
