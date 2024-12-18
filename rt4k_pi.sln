@@ -5,6 +5,8 @@ VisualStudioVersion = 17.11.35327.3
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "rt4k_pi", "rt4k_pi.csproj", "{D27BCE60-2F30-494F-A3F4-0B69FE89BF03}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FuseDotNet", "FuseDotNet\FuseDotNet.csproj", "{935BCA36-DAAC-4505-A1EF-8C7C204A319A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{D27BCE60-2F30-494F-A3F4-0B69FE89BF03}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D27BCE60-2F30-494F-A3F4-0B69FE89BF03}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D27BCE60-2F30-494F-A3F4-0B69FE89BF03}.Release|Any CPU.Build.0 = Release|Any CPU
+		{935BCA36-DAAC-4505-A1EF-8C7C204A319A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{935BCA36-DAAC-4505-A1EF-8C7C204A319A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{935BCA36-DAAC-4505-A1EF-8C7C204A319A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{935BCA36-DAAC-4505-A1EF-8C7C204A319A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

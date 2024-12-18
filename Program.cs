@@ -1,16 +1,13 @@
 /*
  * TODO/ideas list
- * - Checkboxes on settings page do something
  * - Ability to change SSID/password
  * - Some sort of SVS command support
- * - Pizza button
  * - Readme page
  * - Backup settings to RT4K (requires serial file IO)
  * - SMB/CIFS support (requires serial file IO)
  * - RT4K automated firmware update (requires serial file IO, possibly firmware-related query and update commands)
  * - Web-based firmware renaming/management (requires serial file IO)
  * - Better mobile experience
- * - Generally better error checking/handling/tolerance
  * - Look into generating minimal images with pi-gen-micro
  */
 
@@ -38,7 +35,7 @@ public partial class Program
         Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
     }
 
-    public static void Main()
+    public static void Main(string[] args)
     {
         Console.WriteLine("Starting up rt4k_pi");
 
@@ -50,7 +47,10 @@ public partial class Program
         // We don't actually support Windows, but it's useful for testing.
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            Installer.CheckInstall();
+            if (!@args.Contains("--bypassinstaller"))
+            {
+                Installer.CheckInstall();
+            }
 
             Serial = new Serial(115200);
             RT4K = new RT4K(Serial);

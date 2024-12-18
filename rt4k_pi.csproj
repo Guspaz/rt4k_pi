@@ -8,16 +8,23 @@
     <PublishAot>true</PublishAot>
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <AllowUnsafeBlocks>False</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="LTRData.FuseDotNet" Version="1.0.0.2" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="9.0.0" />
     <PackageReference Include="RazorSlices" Version="0.8.1" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Static/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="FuseDotNet\**" />
+    <Content Remove="FuseDotNet\**" />
+    <EmbeddedResource Remove="FuseDotNet\**" />
+    <None Remove="FuseDotNet\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,6 +35,10 @@
     <None Remove="Static\rt4k_remote_led.png" />
     <None Remove="Static\vic_timings.js" />
     <None Remove="Static\w3.css" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="FuseDotNet\FuseDotNet.csproj" />
   </ItemGroup>
 
 </Project>
