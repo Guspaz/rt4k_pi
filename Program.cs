@@ -68,7 +68,7 @@ public partial class Program
                     Console.WriteLine("Instantiating FUSE file system");
                     var fuseOp = new Filesystem.SerialFsOperations();
                     // TODO: This is running single threaded, should it? May be higher performance if not.
-                    fuseOp.Mount(["rt4k_pi", "-s", "-d", "serialfs"], new FuseDotNet.Logging.ConsoleLogger());
+                    fuseOp.Mount(["rt4k_pi", "-s", "-d", "serialfs", "-o", "nodev,nosuid,noatime,allow_other"], new FuseDotNet.Logging.ConsoleLogger());
                     Console.WriteLine("FUSE exited");
                 }
                 catch (Exception ex)

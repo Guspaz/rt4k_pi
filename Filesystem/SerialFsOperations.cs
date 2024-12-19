@@ -208,7 +208,7 @@ internal class SerialFsOperations : IFuseOperations
         var path = FuseHelper.GetString(fileNamePtr);
         Console.WriteLine($"FUSE: ReadDir({path})");
 
-        var files = fakeFiles.Where(s => s != "/" && s.StartsWith(path))
+        var files = fakeFiles.Where(s => path != "/" && s.StartsWith(path))
             .Select(entry => new FuseDirEntry(Path.GetFileName(entry), 0, 0, new() { st_mode = PosixFileMode.Regular }));
 
         var dirs = fakeFolders.Where(s => s != path && s.StartsWith(path))
