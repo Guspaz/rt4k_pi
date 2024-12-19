@@ -77,6 +77,8 @@ public partial class Program
         app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value) );
         app.MapPost("/InstallUpdate", () => Installer.DoUpdate());
 
+        Console.WriteLine("rt4k_pi startup complete.");
+
         app.Run();
     }
 }

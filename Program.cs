@@ -15,6 +15,7 @@ namespace rt4k_pi;
 
 using System.Runtime.InteropServices;
 using FuseDotNet;
+using rt4k_pi.Filesystem;
 
 public partial class Program
 {
@@ -25,6 +26,7 @@ public partial class Program
     public static Ser2net? Ser2net {get; private set;}
     public static StatusDaemon StatusDaemon { get; } = new();
     public static SettingsDaemon Settings { get; } = new();
+    public static FuseDaemon? FuseDaemon { get; } = new();
     public static Installer Installer { get; } = new();
 
     private static readonly Logger logger = new();
@@ -52,6 +54,8 @@ public partial class Program
                 Installer.CheckInstall();
             }
 
+            Installer.EnsureSambaInstalled();
+
             Serial = new Serial(115200);
             RT4K = new RT4K(Serial);
             Ser2net = new Ser2net(Serial, 2000);
@@ -61,21 +65,7 @@ public partial class Program
                 Ser2net.Start();
             }
 
-            Task.Run(() =>
-            {
-                try
-                {
-                    Console.WriteLine("Instantiating FUSE file system");
-                    var fuseOp = new Filesystem.SerialFsOperations();
-                    // TODO: This is running single threaded, should it? May be higher performance if not.
-                    fuseOp.Mount(["rt4k_pi", "-s", "-d", "serialfs", "-o", "nodev,nosuid,noatime,allow_other"], new FuseDotNet.Logging.ConsoleLogger());
-                    Console.WriteLine("FUSE exited");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"FUSE Error ({(ex is PosixException pex ? (int)pex.NativeErrorCode : ex.HResult)}): {ex.Message}");
-                }
-            });
+            FuseDaemon?.StartFuse();
         }
 
         Settings.Load();
