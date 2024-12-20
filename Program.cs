@@ -21,12 +21,12 @@ public partial class Program
 {
     public static readonly string VERSION = "1.0";
 
-    public static Serial? Serial {get; private set;}
-    public static RT4K? RT4K {get; private set;}
-    public static Ser2net? Ser2net {get; private set;}
+    public static Serial? Serial { get; private set; }
+    public static RT4K? RT4K { get; private set; }
+    public static Ser2net? Ser2net {get; private set; }
+    public static FuseDaemon? FuseDaemon { get; private set; }
     public static StatusDaemon StatusDaemon { get; } = new();
     public static SettingsDaemon Settings { get; } = new();
-    public static FuseDaemon? FuseDaemon { get; } = new();
     public static Installer Installer { get; } = new();
 
     private static readonly Logger logger = new();
@@ -54,9 +54,8 @@ public partial class Program
                 Installer.CheckInstall();
             }
 
-            Installer.EnsureSambaInstalled();
-
             Serial = new Serial(115200);
+            FuseDaemon = new();
             RT4K = new RT4K(Serial);
             Ser2net = new Ser2net(Serial, 2000);
 
@@ -64,8 +63,6 @@ public partial class Program
             {
                 Ser2net.Start();
             }
-
-            FuseDaemon?.StartFuse();
         }
 
         Settings.Load();

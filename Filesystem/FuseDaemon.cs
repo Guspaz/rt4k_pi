@@ -4,32 +4,44 @@ namespace rt4k_pi.Filesystem
 {
     public class FuseDaemon
     {
-        public bool FuseRunning { get; private set; } = false;
+        public FuseStatus Status { get; private set; } = FuseStatus.Starting;
 
-        public void StartFuse()
+        public enum FuseStatus
+        {
+            Error,
+            Installing,
+            Starting,
+            Running,
+            Stopped
+        }
+
+        public FuseDaemon()
         {
             Task.Run(() =>
             {
                 try
                 {
-                    Console.WriteLine("Instantiating FUSE file system");
+                    Console.WriteLine("Initializing FUSE file system");
 
-                    if (!Program.Installer.SambaInstalled)
+                    Status = FuseStatus.Installing;
+
+                    if (!Program.Installer.EnsureSambaInstalled())
                     {
                         Console.WriteLine("Skipping FUSE initialization since Samba isn't installed");
-                        FuseRunning = false;
+                        Status = FuseStatus.Error;
                         return;
                     }
 
+                    Status = FuseStatus.Starting;
+
+                    // SerialFsOperation will try to unmount the folder, so we need to stop Samba first
                     Util.RunCommand("systemctl", "stop smbd");
                     Util.RunCommand("systemctl", "stop nmbd");
 
-                    var fuseOp = new SerialFsOperations(); // Unmounts the existing folder, we need to shut down Samba.
+                    var fuseOp = new SerialFsOperations();
 
                     Util.RunCommand("systemctl", "start smbd");
                     Util.RunCommand("systemctl", "start nmbd");
-
-                    FuseRunning = true; // Not actually true yet, but if it fails, we'll set it to false soon enough
 
                     // TODO: This is running single threaded, should it? May be higher performance if not.
                     fuseOp.Mount(["rt4k_pi", "-s", "-d", "serialfs", "-o", "nodev,nosuid,noatime,allow_other"], new FuseDotNet.Logging.ConsoleLogger());
@@ -40,8 +52,10 @@ namespace rt4k_pi.Filesystem
                     Console.WriteLine($"FUSE Error ({(ex is PosixException pex ? (int)pex.NativeErrorCode : ex.HResult)}): {ex.Message}");
                 }
 
-                FuseRunning = false;
+                Status = FuseStatus.Error;
             });
         }
+
+        public void MarkAsRunning() => Status = FuseStatus.Running;
     }
 }

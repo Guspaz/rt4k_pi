@@ -3,7 +3,7 @@
 public class RT4K
 {
     public PowerState Power { get; private set; } = PowerState.Unknown;
-    private Serial serial;
+    private readonly Serial serial;
 
     private TaskCompletionSource readHappened = new();
 

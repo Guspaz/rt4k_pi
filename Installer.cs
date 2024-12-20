@@ -14,8 +14,6 @@ public class Installer
     public int UpdateProgress { get; private set; } = 0;
     public string UpdateError { get; private set; } = "";
 
-    public bool SambaInstalled { get; private set; } = false;
-
     public Installer()
     {
         StringBuilder sb = new();
@@ -183,25 +181,35 @@ public class Installer
         Updating = false;
     }
 
-    public void EnsureSambaInstalled()
+    public bool IsSambaInstalled()
     {
         try
         {
-            // Check if Samba is installed
-            Console.WriteLine("Ensuring that Samba is installed...");
+            Console.WriteLine("Checking if Samba is installed...");
 
-            try
+            string result = Util.RunCommand("dpkg", "-l samba");
+            if (result.Contains("ii  samba")) // "ii" indicates installed packages
             {
-                string result = Util.RunCommand("dpkg", "-l samba");
-                if (result.Contains("ii  samba")) // "ii" indicates installed packages
-                {
-                    Console.WriteLine("Samba is already installed.");
-                    SambaInstalled = true;
-                    return;
-                }
-            } catch (Exception ex) { Console.WriteLine(ex.Message); }
+                Console.WriteLine("Samba is installed.");
+                return true;
+            }
+        }
+        catch { }
 
-            Console.WriteLine("Samba is not installed. Installing...");
+        Console.WriteLine("Samba is not installed.");
+        return false;
+    }
+
+    public bool EnsureSambaInstalled()
+    {
+        try
+        {
+            if (IsSambaInstalled())
+            {
+                return true;
+            }
+
+            Console.WriteLine("Installing Samba");
 
             // Update package list
             Util.RunCommand("sudo", "apt-get update");
@@ -209,12 +217,15 @@ public class Installer
             // Install Samba
             Util.RunCommand("sudo", "apt-get install -y samba");
 
-            SambaInstalled = true;
             Console.WriteLine("Samba installation complete.");
+
+            return true;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error ensuring Samba is installed: {ex.Message}");
         }
+
+        return false;
     }
 }

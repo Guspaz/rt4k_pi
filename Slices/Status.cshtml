@@ -104,17 +104,42 @@
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">Web</th><td>&#x1F7E2; http://@(Model.StatusDaemon.Hostname).local or http://@localIP</td></tr>
+        <tr><th style="width: 25%;">Web</th><td>&#x2705; http://@(Model.StatusDaemon.Hostname).local or http://@localIP</td></tr>
         <tr><th>ser2net</th>
             @if(Model.Ser2net != null)
             {
-                <td>&#x1F7E2; @(Model.StatusDaemon.Hostname).local:@Model.Ser2net.Port or @localIP:@Model.Ser2net.Port</td>
+                <td>&#x2705; @(Model.StatusDaemon.Hostname).local:@Model.Ser2net.Port or @localIP:@Model.Ser2net.Port</td>
             }
             else
             {
                 <td>&#x274C; Not running</td>
             }
         </tr>
-        <tr><th>File Sharing</th><td>&#x274C; Not implemented</td></tr>
+        <tr><th>File Sharing</th>
+            <td>
+                @if (Model.FuseDaemon != null)
+                {
+                    switch (Model.FuseDaemon.Status)
+                    {
+                        case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Starting:
+                        case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Installing:
+                            <span>&#x231B</span>
+                            break;
+                        case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Running:
+                            <span>&#x2705</span>
+                            break;
+                        case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Stopped:
+                        case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Error:
+                            <span>&#x274C</span>
+                            break;
+                    }
+                    <span>@(Model.FuseDaemon.Status.ToString())</span>
+                }
+                else
+                {
+                    <span>&#x274C; Not running</span>
+                }
+            </td>
+        </tr>
     </table>
 </div>

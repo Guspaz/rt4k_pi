@@ -43,6 +43,7 @@ public partial class Program
             Serial = Serial,
             Ser2net = Ser2net,
             StatusDaemon = StatusDaemon,
+            FuseDaemon = FuseDaemon,
             Settings = Settings,
             Installer = Installer,
             RT4K = RT4K

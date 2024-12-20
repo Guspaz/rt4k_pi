@@ -6,9 +6,9 @@ using FuseDotNet.Extensions;
 
 internal class SerialFsOperations : IFuseOperations
 {
-    private string[] fakeFolders = ["/", "/foo", "/bar"];
-    private string[] fakeFiles = ["/foo/foo.bar", "/foo/foo.baz", "/bar/bar.foo", "/bar/bar.qux"];
-    private byte[] fakeContent = Encoding.ASCII.GetBytes("Hello, World!\n");
+    private readonly string[] fakeFolders = ["/", "/foo", "/bar"];
+    private readonly string[] fakeFiles = ["/foo/foo.bar", "/foo/foo.baz", "/bar/bar.foo", "/bar/bar.qux"];
+    private readonly byte[] fakeContent = Encoding.ASCII.GetBytes("Hello, World!\n");
 
     public SerialFsOperations()
     {
@@ -57,7 +57,11 @@ internal class SerialFsOperations : IFuseOperations
         return PosixResult.Success;
     }
 
-    public void Init(ref FuseConnInfo fuse_conn_info) => Console.WriteLine($"Initializing FUSE file system, driver capabilities: {fuse_conn_info.capable}, requested: {fuse_conn_info.want}");
+    public void Init(ref FuseConnInfo fuse_conn_info)
+    {
+        Console.WriteLine($"Initializing FUSE file system, driver capabilities: {fuse_conn_info.capable}, requested: {fuse_conn_info.want}");
+        Program.FuseDaemon?.MarkAsRunning();
+    }
 
     // Functions that we don't support and just want to ignore
     public PosixResult UTime(ReadOnlyFuseMemory<byte> fileNamePtr, TimeSpec atime, TimeSpec mtime, ref FuseFileInfo fileInfo)
