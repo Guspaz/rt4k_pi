@@ -153,7 +153,7 @@ public class RT4K
             // TODO: Replace power state detection with query when available
             if (remote == Remote.Power)
             {
-                PowerOn();
+                PowerToggle();
                 return;
             }
 
