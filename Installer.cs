@@ -241,6 +241,10 @@ public class Installer
         sb.AppendLine("   map to guest = Bad User");
         sb.AppendLine("   guest account = root");
         sb.AppendLine("   browseable = yes");
+        sb.AppendLine("   log file = /var/log/samba/log.%m");
+        sb.AppendLine("   max log size = 1000");
+        sb.AppendLine("   logging = file");
+        sb.AppendLine("   server role = standalone server");
         sb.AppendLine("");
         sb.AppendLine("[sd]");
         sb.AppendLine($"   path = {Directory.GetCurrentDirectory()}/serialfs");

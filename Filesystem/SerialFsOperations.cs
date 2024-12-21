@@ -142,23 +142,22 @@ internal class SerialFsOperations : IFuseOperations
         var path = FuseHelper.GetString(fileNamePtr);
         Console.WriteLine($"FUSE: GetAttr({path})");
 
-
         if (FileExists(path))
         {
-            stat = new()
-            {
-                st_size = fakeContent.Length,
-                st_mode = PosixFileMode.Regular | PosixFileMode.OwnerAll | PosixFileMode.GroupAll | PosixFileMode.OthersAll
-            };
+            stat = default;
+            stat.st_size = fakeContent.Length;
+            stat.st_mode = PosixFileMode.Regular | PosixFileMode.OwnerAll | PosixFileMode.GroupAll | PosixFileMode.OthersAll;
+            stat.st_nlink = 1; // Required for Samba, but should this have some sort of dynamic value?
+
             Console.WriteLine($"FUSE: GetAttr({path}) = FileExists true");
             return PosixResult.Success;
         }
         else if (DirectoryExists(path))
         {
-            stat = new()
-            {
-                st_mode = PosixFileMode.Directory | PosixFileMode.OwnerAll | PosixFileMode.GroupAll | PosixFileMode.OthersAll
-            };
+            stat = default;
+            stat.st_mode = PosixFileMode.Directory | PosixFileMode.OwnerAll | PosixFileMode.GroupAll | PosixFileMode.OthersAll;
+            stat.st_nlink = 2; // Required for Samba, but should this have some sort of dynamic value?
+
             Console.WriteLine($"FUSE: GetAttr({path}) = DirectoryExists true");
             return PosixResult.Success;
         }
