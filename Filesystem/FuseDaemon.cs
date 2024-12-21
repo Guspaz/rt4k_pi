@@ -39,6 +39,14 @@ namespace rt4k_pi.Filesystem
                     Util.RunCommand("systemctl", "stop nmbd");
 
                     var fuseOp = new SerialFsOperations();
+                    
+                    // We'd ordinarily need to restart Samba after doing this, but Samba is conveniently stopped right now
+                    if (!Program.Installer.EnsureSambaConfig())
+                    {
+                        Console.WriteLine("Skipping FUSE initialization since Samba configuration failed");
+                        Status = FuseStatus.Error;
+                        return;
+                    }
 
                     Util.RunCommand("systemctl", "start smbd");
                     Util.RunCommand("systemctl", "start nmbd");

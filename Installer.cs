@@ -1,8 +1,10 @@
 ﻿namespace rt4k_pi;
 
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 
 public class Installer
 {
@@ -224,6 +226,41 @@ public class Installer
         catch (Exception ex)
         {
             Console.WriteLine($"Error ensuring Samba is installed: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    public bool EnsureSambaConfig()
+    {
+        string configFilePath = "/etc/samba/smb.conf";
+
+        // Define the new share configuration
+        StringBuilder sb = new();
+        sb.AppendLine("[global]");
+        sb.AppendLine("   map to guest = Bad User");
+        sb.AppendLine("   guest account = root");
+        sb.AppendLine("   browseable = yes");
+        sb.AppendLine("");
+        sb.AppendLine("[sd]");
+        sb.AppendLine($"   path = {Directory.GetCurrentDirectory()}/serialfs");
+        sb.AppendLine("   browseable = yes");
+        sb.AppendLine("   writable = yes");
+        sb.AppendLine("   guest ok = yes");
+        sb.AppendLine("   guest only = yes");
+        sb.AppendLine("   create mask = 0777");
+        sb.AppendLine("   directory mask = 0777");
+
+        try
+        {
+            // Write the new configuration to the file
+            File.WriteAllText(configFilePath, sb.ToString());
+            Console.WriteLine("Samba configuration file replaced with new configuration.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"An error occurred: {ex.Message}");
         }
 
         return false;

@@ -85,7 +85,7 @@
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">SMB/CIFS</th><td><input class="w3-check" id="enableSmb" type="checkbox" disabled /> <label for="enableSmb">Enable</label></td></tr>
+        <tr><th style="width: 25%;">SMB/CIFS</th><td><input class="w3-check" id="enableSmb" type="checkbox" disabled checked /> <label for="enableSmb">Enable</label></td></tr>
         <tr><th>ser2net</th><td><input class="w3-check" id="EnableSer2net" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.EnableSer2net ? "checked" : "") /> <label for="EnableSer2net">Enable</label></td></tr>
         <tr><th>Pizza</th><td><input class="w3-check" id="enablePizza" type="checkbox" disabled /> <label for="enablePizza">Enable (coming soon)</label></td></tr>
     </table>
