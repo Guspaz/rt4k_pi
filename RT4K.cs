@@ -6,11 +6,39 @@ public class RT4K
     private readonly Serial serial;
 
     private TaskCompletionSource readHappened = new();
+    private TaskCompletionSource powerHappened = new();
 
     public RT4K(Serial serial)
     {
         this.serial = serial;
         serial.RegisterReader(HandleRead);
+
+        // Power state is unknown on start, try to turn on and see what happens
+        // TODO: Replace this with an actual query when implemented
+        Task.Run(() =>
+        {
+            Task.Delay(1000).Wait();
+
+            Console.WriteLine("Determining RT4K power state");
+            readHappened = new();
+            powerHappened = new();
+
+            PowerOn();
+            if (!readHappened.Task.Wait(500))
+            {
+                // Nothing happened, so we must already be on
+                Console.WriteLine("RT4K seems to be on");
+                Power = PowerState.On;
+            }
+            else
+            {
+                // The RT4K turned on, so it was off before. Turn it off again.
+                Console.WriteLine("RT4K was off, turning it off again");
+                powerHappened.Task.Wait(10000);
+                Task.Delay(2000).Wait();
+                PowerOff();
+            }
+        });
     }
 
     private void HandleRead(string data)
@@ -23,11 +51,13 @@ public class RT4K
         {
             Console.WriteLine("Detected RT4K startup");
             Power = PowerState.On;
+            powerHappened.TrySetResult();
         }
         else if (data.StartsWith("[MCU] Entering Sleep Mode"))
         {
             Console.WriteLine("Detected RT4K shutdown");
             Power = PowerState.Off;
+            powerHappened.TrySetResult();
         }
     }
 
