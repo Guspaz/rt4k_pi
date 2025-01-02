@@ -4,11 +4,12 @@
  * - Some sort of SVS command support
  * - Readme page
  * - Backup settings to RT4K (requires serial file IO)
- * - SMB/CIFS support (requires serial file IO)
+ * - SD card access (requires serial file IO)
  * - RT4K automated firmware update (requires serial file IO, possibly firmware-related query and update commands)
  * - Web-based firmware renaming/management (requires serial file IO)
  * - Better mobile experience
  * - Look into generating minimal images with pi-gen-micro
+ * - Determine RT4K power status on startup (try to turn on, if nothing happens, we're already on, if it starts up, we were off, then turn off again)
  */
 
 namespace rt4k_pi;

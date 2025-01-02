@@ -104,11 +104,11 @@
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">Web</th><td>&#x2705; http://@(Model.StatusDaemon.Hostname).local or http://@localIP</td></tr>
+        <tr><th style="width: 25%;">Web</th><td>&#x2705; Running - http://@(Model.StatusDaemon.Hostname).local or http://@localIP</td></tr>
         <tr><th>ser2net</th>
             @if(Model.Ser2net != null)
             {
-                <td>&#x2705; @(Model.StatusDaemon.Hostname).local:@Model.Ser2net.Port or @localIP:@Model.Ser2net.Port</td>
+                <td>&#x2705; Running - @(Model.StatusDaemon.Hostname).local:@Model.Ser2net.Port or @localIP:@Model.Ser2net.Port</td>
             }
             else
             {
@@ -123,17 +123,16 @@
                     {
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Starting:
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Installing:
-                            <span>&#x231B</span>
+                            <span>&#x231B; @(Model.FuseDaemon.Status.ToString())</span>
                             break;
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Running:
-                            <span>&#x2705</span>
+                            <span>&#x2705; Running -  \\@(Model.StatusDaemon.Hostname).local\sd or \\@localIP\sd</span>
                             break;
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Stopped:
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Error:
-                            <span>&#x274C</span>
+                            <span>&#x274C; @(Model.FuseDaemon.Status.ToString())</span>
                             break;
                     }
-                    <span>@(Model.FuseDaemon.Status.ToString())</span>
                 }
                 else
                 {
