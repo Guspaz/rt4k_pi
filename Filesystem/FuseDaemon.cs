@@ -25,33 +25,31 @@ namespace rt4k_pi.Filesystem
 
                     Status = FuseStatus.Installing;
 
-                    if (!Program.Installer.EnsureSambaInstalled())
+                    if (!Program.Installer.EnsureKsmbdInstalled())
                     {
-                        Console.WriteLine("Skipping FUSE initialization since Samba isn't installed");
+                        Console.WriteLine("Skipping FUSE initialization since ksmbd isn't installed");
                         Status = FuseStatus.Error;
                         return;
                     }
 
                     Status = FuseStatus.Starting;
 
-                    // SerialFsOperation will try to unmount the folder, so we need to stop Samba first
-                    Util.RunCommand("systemctl", "stop smbd");
-                    Util.RunCommand("systemctl", "stop nmbd");
+                    // SerialFsOperation will try to unmount the folder, so we need to stop ksmbd first
+                    Util.RunCommand("systemctl", "stop ksmbd");
 
                     var fuseOp = new SerialFsOperations();
                     
-                    // We'd ordinarily need to restart Samba after doing this, but Samba is conveniently stopped right now
-                    if (!Program.Installer.EnsureSambaConfig())
+                    // We'd ordinarily need to restart ksmbd after doing this, but ksmbd is conveniently stopped right now
+                    if (!Program.Installer.EnsureKsmbdConfig())
                     {
-                        Console.WriteLine("Skipping FUSE initialization since Samba configuration failed");
+                        Console.WriteLine("Skipping FUSE initialization since ksmbd configuration failed");
                         Status = FuseStatus.Error;
                         return;
                     }
 
-                    Util.RunCommand("systemctl", "start smbd");
-                    Util.RunCommand("systemctl", "start nmbd");
+                    Util.RunCommand("systemctl", "start ksmbd");
 
-                    // TODO: This is running single threaded, should it? May be higher performance if not.
+                    // TODO: -s runs it single-threaded. Might need this for real serial file i/o, but investigate this in the future.
                     fuseOp.Mount(["rt4k_pi", "-s", "-d", "serialfs", "-o", "nodev,nosuid,noatime,allow_other"], new FuseDotNet.Logging.ConsoleLogger());
                     Console.WriteLine("FUSE exited");
                 }

@@ -183,57 +183,54 @@ public class Installer
         Updating = false;
     }
 
-    public bool IsSambaInstalled()
+    public bool IsKsmbdInstalled()
     {
         try
         {
-            Console.WriteLine("Checking if Samba is installed...");
+            Console.WriteLine("Checking if ksmbd is installed...");
 
-            string result = Util.RunCommand("dpkg", "-l samba");
-            if (result.Contains("ii  samba")) // "ii" indicates installed packages
+            string result = Util.RunCommand("dpkg", "-l ksmbd-tools");
+            if (result.Contains("ii  ksmbd-tools")) // "ii" indicates installed packages
             {
-                Console.WriteLine("Samba is installed.");
+                Console.WriteLine("ksmbd is installed.");
                 return true;
             }
         }
         catch { }
 
-        Console.WriteLine("Samba is not installed.");
+        Console.WriteLine("ksmbd is not installed.");
         return false;
     }
 
-    public bool EnsureSambaInstalled()
+    public bool EnsureKsmbdInstalled()
     {
         try
         {
-            if (IsSambaInstalled())
+            if (IsKsmbdInstalled())
             {
                 return true;
             }
 
-            Console.WriteLine("Installing Samba");
+            Console.WriteLine("Installing ksmbd");
 
-            // Update package list
             Util.RunCommand("sudo", "apt-get update");
+            Util.RunCommand("sudo", "apt-get install -y ksmbd-tools");
 
-            // Install Samba
-            Util.RunCommand("sudo", "apt-get install -y samba");
-
-            Console.WriteLine("Samba installation complete.");
+            Console.WriteLine("ksmbd installation complete.");
 
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error ensuring Samba is installed: {ex.Message}");
+            Console.WriteLine($"Error ensuring ksmbd is installed: {ex.Message}");
         }
 
         return false;
     }
 
-    public bool EnsureSambaConfig()
+    public bool EnsureKsmbdConfig()
     {
-        string configFilePath = "/etc/samba/smb.conf";
+        string configFilePath = "/etc/ksmbd/ksmbd.conf";
 
         // Define the new share configuration
         StringBuilder sb = new();
@@ -241,25 +238,21 @@ public class Installer
         sb.AppendLine("   map to guest = Bad User");
         sb.AppendLine("   guest account = root");
         sb.AppendLine("   browseable = yes");
-        sb.AppendLine("   log file = /var/log/samba/log.%m");
-        sb.AppendLine("   max log size = 1000");
-        sb.AppendLine("   logging = file");
-        sb.AppendLine("   server role = standalone server");
         sb.AppendLine("");
         sb.AppendLine("[sd]");
         sb.AppendLine($"   path = {Directory.GetCurrentDirectory()}/serialfs");
         sb.AppendLine("   browseable = yes");
-        sb.AppendLine("   writable = yes");
+        sb.AppendLine("   writeable = yes");
         sb.AppendLine("   guest ok = yes");
-        sb.AppendLine("   guest only = yes");
         sb.AppendLine("   create mask = 0777");
         sb.AppendLine("   directory mask = 0777");
 
         try
         {
             // Write the new configuration to the file
+            Util.RunCommand("sudo", "mkdir -p /etc/ksmbd");
             File.WriteAllText(configFilePath, sb.ToString());
-            Console.WriteLine("Samba configuration file replaced with new configuration.");
+            Console.WriteLine("ksmbd configuration file replaced with new configuration.");
             return true;
         }
         catch (Exception ex)

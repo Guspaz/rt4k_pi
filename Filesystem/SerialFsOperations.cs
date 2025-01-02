@@ -17,7 +17,7 @@ internal class SerialFsOperations : IFuseOperations
 
         try
         {
-            // TODO: May need to stop samba before doing this?
+            // TODO: May need to stop ksmbd before doing this?
             Util.RunCommand("umount", "-f serialfs");
         }
         catch
@@ -32,7 +32,6 @@ internal class SerialFsOperations : IFuseOperations
                 Console.WriteLine("Failed to umount serialfs");
             }
         }
-            
         
         Util.RunCommand("mkdir", "-p serialfs");
     }
@@ -147,7 +146,7 @@ internal class SerialFsOperations : IFuseOperations
             stat = default;
             stat.st_size = fakeContent.Length;
             stat.st_mode = PosixFileMode.Regular | PosixFileMode.OwnerAll | PosixFileMode.GroupAll | PosixFileMode.OthersAll;
-            stat.st_nlink = 1; // Required for Samba, but should this have some sort of dynamic value?
+            stat.st_nlink = 1; // Required for ksmbd, but should this have some sort of dynamic value?
 
             Console.WriteLine($"FUSE: GetAttr({path}) = FileExists true");
             return PosixResult.Success;
@@ -156,7 +155,7 @@ internal class SerialFsOperations : IFuseOperations
         {
             stat = default;
             stat.st_mode = PosixFileMode.Directory | PosixFileMode.OwnerAll | PosixFileMode.GroupAll | PosixFileMode.OthersAll;
-            stat.st_nlink = 2; // Required for Samba, but should this have some sort of dynamic value?
+            stat.st_nlink = 2; // Required for ksmbd, but should this have some sort of dynamic value?
 
             Console.WriteLine($"FUSE: GetAttr({path}) = DirectoryExists true");
             return PosixResult.Success;
