@@ -213,8 +213,19 @@ public class Installer
 
             Console.WriteLine("Installing ksmbd");
 
-            Util.RunCommand("sudo", "apt-get update");
-            Util.RunCommand("sudo", "apt-get install -y ksmbd-tools");
+            // bookworm's copy of ksmbd-tools is broken, we need a newer version, but don't want this to break on newer debian releases
+            if (File.Exists("/etc/os-release") && File.ReadAllText("/etc/os-release").Contains("VERSION_CODENAME=bookworm"))
+            {
+                Console.WriteLine("Using bookworm-backports version of ksmbd");
+                File.WriteAllText("/etc/apt/sources.list.d/bookworm-backports.list", "deb http://deb.debian.org/debian bookworm-backports main");
+                Util.RunCommand("sudo", "apt-get update");
+                Util.RunCommand("sudo", "apt-get install -y ksmbd-tools/bookworm-backports");
+            }
+            else
+            {
+                Util.RunCommand("sudo", "apt-get update");
+                Util.RunCommand("sudo", "apt-get install -y ksmbd-tools");
+            }
 
             Console.WriteLine("ksmbd installation complete.");
 
@@ -238,14 +249,15 @@ public class Installer
         sb.AppendLine("   map to guest = Bad User");
         sb.AppendLine("   guest account = root");
         sb.AppendLine("   browseable = yes");
+        sb.AppendLine("   create mask = 0777");
+        sb.AppendLine("   directory mask = 0777");
+        sb.AppendLine("   writeable = yes");
+        sb.AppendLine("   guest ok = yes");
+        sb.AppendLine("   netbios name = rt4k.local");
         sb.AppendLine("");
         sb.AppendLine("[sd]");
         sb.AppendLine($"   path = {Directory.GetCurrentDirectory()}/serialfs");
-        sb.AppendLine("   browseable = yes");
-        sb.AppendLine("   writeable = yes");
-        sb.AppendLine("   guest ok = yes");
-        sb.AppendLine("   create mask = 0777");
-        sb.AppendLine("   directory mask = 0777");
+
 
         try
         {
