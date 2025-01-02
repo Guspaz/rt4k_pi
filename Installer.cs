@@ -214,15 +214,16 @@ public class Installer
             Console.WriteLine("Installing ksmbd");
 
             // bookworm's copy of ksmbd-tools is broken, we need a newer version, but don't want this to break on newer debian releases
+            // We could get it from backports, but installing from a local package is much faster
             if (File.Exists("/etc/os-release") && File.ReadAllText("/etc/os-release").Contains("VERSION_CODENAME=bookworm"))
             {
-                Console.WriteLine("Using bookworm-backports version of ksmbd");
-                File.WriteAllText("/etc/apt/sources.list.d/bookworm-backports.list", "deb http://deb.debian.org/debian bookworm-backports main");
-                Util.RunCommand("sudo", "apt-get update");
-                Util.RunCommand("sudo", "apt-get install -y ksmbd-tools/bookworm-backports");
+                Console.WriteLine("Running Debian Bookworm, installing ksmbd-tools from local package");
+                System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("rt4k_pi.Static.ksmbd-tools_3.5.2-2~bpo12+1_arm64.deb")?.CopyTo(new FileStream("ksmbd-tools.deb", FileMode.Create, FileAccess.Write));
+                Util.RunCommand("sudo", "dpkg -i ./ksmbd-tools.deb");
             }
             else
             {
+                Console.WriteLine("Running unknown Debian release, falling back to online apt repo");
                 Util.RunCommand("sudo", "apt-get update");
                 Util.RunCommand("sudo", "apt-get install -y ksmbd-tools");
             }

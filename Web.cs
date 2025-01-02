@@ -34,7 +34,7 @@ public partial class Program
         {
             FileProvider = embeddedProvider,
             ContentTypeProvider = contentProvider,
-            //ServeUnknownFileTypes = true
+            ServeUnknownFileTypes = true
         });
 
         var appState = new AppState()
