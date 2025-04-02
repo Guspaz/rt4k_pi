@@ -9,7 +9,6 @@
  * - Web-based firmware renaming/management (requires serial file IO)
  * - Better mobile experience
  * - Look into generating minimal images with pi-gen-micro
- * - Determine RT4K power status on startup (try to turn on, if nothing happens, we're already on, if it starts up, we were off, then turn off again)
  */
 
 namespace rt4k_pi;

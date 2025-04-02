@@ -32,7 +32,7 @@
     <None Remove="Static\imageMapResizer.min.js" />
     <None Remove="Static\jquery-3.4.1.min.js" />
     <None Remove="Static\rt4k_remote.avif" />
-    <None Remove="Static\rt4k_remote_led.png" />
+    <None Remove="Static\rt4k_remote_led.avif" />
     <None Remove="Static\vic_timings.js" />
     <None Remove="Static\w3.css" />
   </ItemGroup>
