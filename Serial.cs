@@ -1,5 +1,6 @@
 ﻿namespace rt4k_pi;
 
+using System.Runtime.InteropServices;
 using System.Text;
 
 // This is all terrible and can be massively improved.
@@ -10,7 +11,7 @@ public class Serial
 {
     public bool IsConnected { get; private set; }
 
-    private FileStream port = new("/dev/null", FileMode.Open);
+    private Stream port = null!;
     private readonly HashSet<Action<byte[]>> readers = [];
     private readonly HashSet<Action<string>> stringReaders = [];
     private readonly Encoding encoding = Encoding.ASCII;
@@ -23,6 +24,8 @@ public class Serial
     private bool fileModeActive = false;
 
     private readonly int maxQueueLength = 8 * 1024 * 1024; // 8MB write buffer
+
+    private static readonly bool isWindows = !RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
     public Serial(int baudRate)
     {
@@ -41,7 +44,7 @@ public class Serial
             {
                 try
                 {
-                    if (IsConnected && !File.Exists(port.Name))
+                    if (IsConnected && !isWindows && !File.Exists((port as FileStream)?.Name ?? ""))
                     {
                         throw new IOException("Serial port disconnected");
                     }
@@ -52,8 +55,16 @@ public class Serial
                         {
                             Console.WriteLine($"Detected serial port at {currentPort}");
                             Console.WriteLine($"Connecting to {currentPort}");
-                            ConfigurePort(currentPort, baudRate);
-                            port = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+                            if (!isWindows)
+                            {
+                                Util.RunCommand("stty", $"-F {currentPort} {baudRate} cs8 -cstopb -parenb");
+                                port = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                            }
+                            else
+                            {
+                                port = WindowsSerialPort.OpenAndConfigure(currentPort, baudRate);
+                            }
                             Console.WriteLine($"Connected to {currentPort}");
                             IsConnected = true;
                         }
@@ -63,7 +74,7 @@ public class Serial
                 {
                     Console.WriteLine($"Serial error: {ex.Message}");
                     IsConnected = false;
-                    port.Dispose();
+                    port?.Dispose();
                 }
 
                 await Task.Delay(2000);
@@ -74,13 +85,20 @@ public class Serial
     ~Serial()
     {
         cts.Cancel();
-        port.Close();
+        port?.Close();
     }
 
-    private static string? GetPort() => Directory.GetFiles("/dev", "ttyUSB*").FirstOrDefault();
-
-    private static void ConfigurePort(string portName, int baudRate) =>
-        Util.RunCommand("stty", $"-F {portName} {baudRate} cs8 -cstopb -parenb");
+    private static string? GetPort()
+    {
+        if (isWindows)
+        {
+            return WindowsSerialPort.FindPort();
+        }
+        else
+        {
+            return Directory.GetFiles("/dev", "ttyUSB*").FirstOrDefault();
+        }
+    }
 
     private async void HandleWrite()
     {

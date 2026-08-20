@@ -54,15 +54,16 @@ public partial class Program
                 Installer.CheckInstall();
             }
 
-            Serial = new Serial(115200);
             FuseDaemon = new();
-            RT4K = new RT4K(Serial);
-            Ser2net = new Ser2net(Serial, 2000);
+        }
 
-            if (Settings.EnableSer2net)
-            {
-                Ser2net.Start();
-            }
+        Serial = new Serial(115200);
+        RT4K = new RT4K(Serial);
+        Ser2net = new Ser2net(Serial, 2000);
+
+        if (Settings.EnableSer2net)
+        {
+            Ser2net.Start();
         }
 
         Settings.Load();
