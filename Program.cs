@@ -57,7 +57,7 @@ public partial class Program
             FuseDaemon = new();
         }
 
-        Serial = new Serial(115200);
+        Serial = new Serial(2000000);
         RT4K = new RT4K(Serial);
         Ser2net = new Ser2net(Serial, 2000);
 

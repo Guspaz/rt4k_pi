@@ -9,11 +9,34 @@ public class Logger : TextWriter
     private const int QUEUE_SIZE = 16 * 1024;
     private int logSize = 0;
 
+    // Console.Out is written from the serial processing task, the status poller and ASP.NET
+    // concurrently. A single Write here is several separate oldOut.Write calls plus mutation of
+    // the shared queue, so without this lock two writers interleave inside one log entry and
+    // produce shredded output.
+    private readonly Lock writeLock = new();
+
     public Queue<LogEntry> Log { get; } = new();
     private readonly TextWriter oldOut = Console.Out;
     public override Encoding Encoding => Encoding.UTF8;
 
+    /// <summary>Takes a consistent snapshot of the log for display.</summary>
+    public LogEntry[] Snapshot()
+    {
+        lock (writeLock)
+        {
+            return [.. Log];
+        }
+    }
+
     public override void Write(char[] buffer, int index, int count)
+    {
+        lock (writeLock)
+        {
+            WriteCore(buffer, index, count);
+        }
+    }
+
+    private void WriteCore(char[] buffer, int index, int count)
     {
         // Store the old color and reset it, we'll use ANSI codes for the actual output
         var oldColor = Console.ForegroundColor;

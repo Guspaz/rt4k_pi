@@ -22,13 +22,19 @@ internal class WindowsSerialPort
             DataBits = 8,
             Parity = System.IO.Ports.Parity.None,
             StopBits = System.IO.Ports.StopBits.One,
-            Handshake = System.IO.Ports.Handshake.None,
+            // Streaming uploads depend on the device's CTS# backpressure, so the host must
+            // actually honour it. Without RTS/CTS we overrun the device's 2048 byte RX ring.
+            Handshake = System.IO.Ports.Handshake.RequestToSend,
             ReadTimeout = -1,
-            WriteTimeout = -1
+            WriteTimeout = -1,
+            // Streaming downloads have no flow control at all, so the driver buffer is the only
+            // thing absorbing a scheduling hiccup on our side. Make it generous.
+            ReadBufferSize = 1 << 20,
+            WriteBufferSize = 1 << 16
         };
 
         sp.Open();
-        Console.WriteLine($"Port opened and configured: {baudRate} baud, 8 data bits, no parity, 1 stop bit");
+        Console.WriteLine($"Port opened and configured: {baudRate} baud, 8 data bits, no parity, 1 stop bit, RTS/CTS");
 
         return new SerialPortStreamAdapter(sp);
     }

@@ -3,63 +3,118 @@
 public class RT4K
 {
     public PowerState Power { get; private set; } = PowerState.Unknown;
-    private readonly Serial serial;
 
-    private TaskCompletionSource readHappened = new();
-    private TaskCompletionSource powerHappened = new();
+    // Fields from the most recent successful "status" poll (see PROTOCOL.md, "status")
+    public IReadOnlyDictionary<string, string> Status { get; private set; } = new Dictionary<string, string>();
+
+    private readonly Serial serial;
+    private readonly CancellationTokenSource cts = new();
+
+    // How long the RT4K gets to answer a "status" poll before we call it asleep. The device
+    // services one command per superloop pass, so this is generous.
+    private const int StatusTimeoutMs = 500;
+
+    // Poll harder while we think it's asleep so a power on is noticed quickly
+    private const int PollIntervalOnMs = 5000;
+    private const int PollIntervalOffMs = 1000;
+
+    // Last status reply, ignoring the fields that change every poll, so we only log changes
+    private string? lastStatus;
 
     public RT4K(Serial serial)
     {
         this.serial = serial;
-        serial.RegisterReader(HandleRead);
 
-        // Power state is unknown on start, try to turn on and see what happens
-        // TODO: Replace this with an actual query when implemented
-        Task.Run(() =>
+        // While the RT4K is in standby its dispatcher doesn't run: every command except
+        // "pwr on" is silently discarded. That makes a "status" poll a reliable power probe.
+        Task.Run(async () =>
         {
-            Task.Delay(1000).Wait();
-
-            Console.WriteLine("Determining RT4K power state");
-            readHappened = new();
-            powerHappened = new();
-
-            PowerOn();
-            if (!readHappened.Task.Wait(500))
+            while (!cts.Token.IsCancellationRequested)
             {
-                // Nothing happened, so we must already be on
-                Console.WriteLine("RT4K seems to be on");
-                Power = PowerState.On;
+                await RefreshPowerAsync();
+                await Task.Delay(Power == PowerState.On ? PollIntervalOnMs : PollIntervalOffMs, cts.Token);
             }
-            else
-            {
-                // The RT4K turned on, so it was off before. Turn it off again.
-                Console.WriteLine("RT4K was off, turning it off again");
-                powerHappened.Task.Wait(10000);
-                Task.Delay(2000).Wait();
-                PowerOff();
-            }
-        });
+        }, cts.Token);
     }
 
-    private void HandleRead(string data)
+    ~RT4K()
     {
-        // Let anything waiting on a read know that it happened
-        readHappened.TrySetResult();
+        cts.Cancel();
+    }
 
-        // Update known power state based on observed serial output
-        if (data.StartsWith("[MCU] Boot Sequence Complete..."))
+    /// <summary>
+    /// Polls the RT4K with "status". A reply means it's awake, silence means it's in standby.
+    /// </summary>
+    public async Task<PowerState> RefreshPowerAsync()
+    {
+        if (!serial.IsConnected)
         {
-            Console.WriteLine("Detected RT4K startup");
-            Power = PowerState.On;
-            powerHappened.TrySetResult();
+            return Power = PowerState.Unknown;
         }
-        else if (data.StartsWith("[MCU] Entering Sleep Mode"))
+
+        try
         {
-            Console.WriteLine("Detected RT4K shutdown");
-            Power = PowerState.Off;
-            powerHappened.TrySetResult();
+            // Line 4 (the error counters) is the last line every build emits, but the profile
+            // line follows it on newer builds, so just collect whatever arrives in the window.
+            var lines = await serial.SendCommandAsync("status", line => line.StartsWith("status oerr="), StatusTimeoutMs, echoIf: replies =>
+            {
+                string fingerprint = StatusFingerprint(replies);
+
+                if (fingerprint == lastStatus)
+                {
+                    return false;
+                }
+
+                lastStatus = fingerprint;
+                return true;
+            });
+            var status = lines.Where(line => line.StartsWith("status ")).ToList();
+
+            if (status.Count == 0)
+            {
+                if (Power != PowerState.Off)
+                {
+                    Console.WriteLine("RT4K is not responding, assuming it's in standby");
+                }
+
+                return Power = PowerState.Off;
+            }
+
+            var fields = new Dictionary<string, string>();
+
+            foreach (string line in status)
+            {
+                foreach (var field in Serial.ParseFields(line))
+                {
+                    fields[field.Key] = field.Value;
+                }
+            }
+
+            Status = fields;
+
+            if (Power != PowerState.On)
+            {
+                Console.WriteLine($"RT4K is on (fw {fields.GetValueOrDefault("fw", "unknown")})");
+            }
+
+            return Power = PowerState.On;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error polling RT4K status: {ex.Message}");
+            return Power = PowerState.Unknown;
         }
     }
+
+    public PowerState RefreshPower() => RefreshPowerAsync().GetAwaiter().GetResult();
+
+    // Boils a status reply down to the parts that don't change on their own, so a poll that
+    // reports the same state twice in a row can be kept out of the log. The uptime counter and
+    // the superloop timing line move every single poll, so both are dropped.
+    private static string StatusFingerprint(List<string> lines)
+        => string.Join('\n', lines
+            .Where(line => !line.StartsWith("status loop_"))
+            .Select(line => string.Join(' ', line.Split(' ').Where(token => !token.StartsWith("uptime_s=")))));
 
     public enum PowerState
     {
@@ -180,7 +235,6 @@ public class RT4K
     {
         if (Enum.TryParse(remoteString, true, out Remote remote))
         {
-            // TODO: Replace power state detection with query when available
             if (remote == Remote.Power)
             {
                 PowerToggle();
@@ -200,32 +254,105 @@ public class RT4K
         serial.WriteLine("remote " + remoteLookup[remote]);
     }
 
+    /// <summary>
+    /// Wakes the RT4K. "pwr on" is the only command the standby dispatcher honours.
+    /// </summary>
     public void PowerOn()
     {
         serial.WriteLine("pwr on");
+
+        // Give the unit time to boot before we believe a status poll
+        Task.Delay(8000).ContinueWith(_ => RefreshPowerAsync());
     }
 
+    /// <summary>
+    /// Puts the RT4K into standby by injecting the remote's power key.
+    /// </summary>
     public void PowerOff()
     {
         SendRemote(Remote.Power);
+
+        Task.Delay(3000).ContinueWith(_ => RefreshPowerAsync());
     }
 
     public void PowerToggle()
     {
-        // If we try to toggle power and don't hear from the RT4K for half a second, we know it's not in the expected power state.
-        // In that case, we try to toggle the other direction to get back in sync.
-        readHappened = new();
-        switch (Power)
+        // Make sure we're acting on a fresh reading rather than a stale poll
+        switch (RefreshPower())
         {
-            case PowerState.Unknown:
-            case PowerState.Off:
-                PowerOn();
-                if (!readHappened.Task.Wait(500)) PowerOff();
-                break;
             case PowerState.On:
                 PowerOff();
-                if (!readHappened.Task.Wait(500)) PowerOn();
                 break;
+            case PowerState.Off:
+            case PowerState.Unknown:
+                PowerOn();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Debug helper: writes 1 MB of random data to the SD card, reads it back, verifies it
+    /// round-tripped intact, reports throughput, then deletes the file.
+    /// </summary>
+    public async Task<string> BenchmarkAsync(CancellationToken token = default)
+    {
+        const string path = "test.dat";
+        byte[] sent = new byte[1024 * 1024];
+        Random.Shared.NextBytes(sent);
+
+        try
+        {
+            // Pure transport measurement first: rtl1 echo round-trips a payload through the
+            // device without touching the SD card, hashing, or the file commit path. All rounds
+            // run inside ONE session so we measure streaming throughput, not session setup.
+            Console.WriteLine("Benchmark: measuring raw transport with rtl1 echo...");
+            byte[] probe = new byte[Serial.MaxPayload];
+            Random.Shared.NextBytes(probe);
+
+            // Warm-up session so first-call costs aren't counted
+            await serial.EchoManyAsync(probe, 4, token);
+
+            const int echoRounds = 256;
+            var (echoBack, echoElapsed) = await serial.EchoManyAsync(probe, echoRounds, token);
+
+            if (!echoBack.AsSpan().SequenceEqual(probe))
+            {
+                throw new SerialException("rtl1 echo returned different data than it was sent");
+            }
+
+            double echoSeconds = echoElapsed.TotalSeconds;
+
+            // Each round trip moves the payload twice (up and back)
+            double echoRate = echoRounds * probe.Length * 2 / 1024.0 / echoSeconds;
+            double echoTripMs = echoSeconds * 1000 / echoRounds;
+            Console.WriteLine($"Benchmark: echo {echoRate:F1} KB/s both ways ({echoTripMs:F2} ms per {probe.Length} byte round trip)");
+
+            Console.WriteLine($"Benchmark: writing {sent.Length / 1024} KB to /{path}...");
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            await serial.PutFileAsync(path, sent, token: token);
+            double writeSeconds = timer.Elapsed.TotalSeconds;
+
+            Console.WriteLine("Benchmark: reading it back...");
+            timer.Restart();
+            byte[] received = await serial.GetFileAsync(path, token: token);
+            double readSeconds = timer.Elapsed.TotalSeconds;
+
+            string verify = received.AsSpan().SequenceEqual(sent)
+                ? "data verified OK"
+                : $"DATA MISMATCH (sent {sent.Length} bytes, got {received.Length})";
+
+            string result = $"{verify}, echo {echoRate:F1} KB/s, write {sent.Length / 1024 / writeSeconds:F1} KB/s, read {received.Length / 1024 / readSeconds:F1} KB/s";
+            Console.WriteLine($"Benchmark: {result}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Benchmark failed: {ex.Message}");
+            return $"Failed: {ex.Message}";
+        }
+        finally
+        {
+            //await serial.SendCommandAsync($"rm {path}", line => line.StartsWith("rm "), token: token);
         }
     }
 }

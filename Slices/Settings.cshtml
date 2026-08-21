@@ -113,3 +113,35 @@
         }
     }
 </script>
+
+<h2>Debug</h2>
+
+<div class='w3-panel'>
+    <table class='w3-table-all w3-card' style='max-width: 700px;'>
+        <tr><th style="width: 25%;">Serial benchmark</th><td><button class="@LayoutModel.ButtonClasses" onclick="runBenchmark(); return false;" type="button" id="benchmarkButton">Run 1 MB round-trip</button></td></tr>
+        <tr><th>Result:</th><td id="benchmarkResult">Idle</td></tr>
+    </table>
+</div>
+
+<script>
+    async function runBenchmark() {
+        const button = document.getElementById("benchmarkButton");
+        const result = document.getElementById("benchmarkResult");
+
+        try {
+            button.disabled = true;
+            result.textContent = "Running...";
+
+            const response = await fetch("/RunBenchmark", { method: 'POST' });
+            if (!response.ok) {
+                throw new Error("Network response was not ok");
+            }
+            result.textContent = await response.text();
+        } catch (error) {
+            console.error("Error running benchmark: ", error);
+            result.textContent = "Error running benchmark";
+        } finally {
+            button.disabled = false;
+        }
+    }
+</script>

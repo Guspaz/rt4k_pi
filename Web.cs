@@ -77,6 +77,7 @@ public partial class Program
         app.MapPost("/RemoteCommand/{cmd}", ([FromRoute] string cmd) => RT4K?.SendRemoteString(cmd) );
         app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value) );
         app.MapPost("/InstallUpdate", () => Installer.DoUpdate());
+        app.MapPost("/RunBenchmark", async () => RT4K is null ? "RT4K not available" : await RT4K.BenchmarkAsync());
 
         Console.WriteLine("rt4k_pi startup complete.");
 

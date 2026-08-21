@@ -369,3 +369,6 @@ stop
 
 # App settings from testing
 settings.json
+
+# Internal documentation
+PROTOCOL*.md

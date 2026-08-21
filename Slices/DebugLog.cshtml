@@ -21,6 +21,6 @@
 
 <div class="w3-panel w3-card w3-text-white" style="width: 1200px; background-color: #0c0c0c;">
     <pre style="white-space: pre-wrap; word-break: break-word;">
-        @foreach (Logger.LogEntry line in Model.Logger.Log.ToArray()) {<span style="color: @GetColor(line.Color);">@line.Entry</span>}
+        @foreach (Logger.LogEntry line in Model.Logger.Snapshot()) {<span style="color: @GetColor(line.Color);">@line.Entry</span>}
     </pre>
 </div>
