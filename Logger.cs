@@ -19,6 +19,33 @@ public class Logger : TextWriter
     private readonly TextWriter oldOut = Console.Out;
     public override Encoding Encoding => Encoding.UTF8;
 
+    // Console.ForegroundColor is process-global, so a caller that sets it and then writes is
+    // racing every other writer: WriteCore resets the colour while it runs, and any write that
+    // lands in that window reads back the default and loses its colour. Callers that know their
+    // colour publish it here instead, where only the writing thread can see it.
+    [ThreadStatic]
+    private static ConsoleColor? threadColor;
+
+    // Tracks whether the console is sitting mid-line and who put it there, so text the device
+    // never terminated can't run into whatever gets logged next.
+    private bool atLineStart = true;
+    private ConsoleColor lastColor = ConsoleColor.Green;
+
+    /// <summary>Writes text in an explicit colour, immune to what other threads are doing.</summary>
+    public static void Write(string text, ConsoleColor color)
+    {
+        threadColor = color;
+
+        try
+        {
+            Console.Write(text);
+        }
+        finally
+        {
+            threadColor = null;
+        }
+    }
+
     /// <summary>Takes a consistent snapshot of the log for display.</summary>
     public LogEntry[] Snapshot()
     {
@@ -38,16 +65,38 @@ public class Logger : TextWriter
 
     private void WriteCore(char[] buffer, int index, int count)
     {
-        // Store the old color and reset it, we'll use ANSI codes for the actual output
+        // An explicit per-thread colour wins; otherwise fall back to the global one for callers
+        // that still set it. Resetting the global here is safe only because anything that cares
+        // about its colour has already captured it in threadColor.
         var oldColor = Console.ForegroundColor;
-        bool isVerboseLog = false;
         Console.ResetColor();
 
         // Prepare our log entry
         var entryText = new string(buffer, index, count);
-        ConsoleColor entryColor = oldColor;
+        ConsoleColor entryColor = threadColor ?? oldColor;
+        bool isVerboseLog = entryText.StartsWith("info: ");
 
-        if (entryText.StartsWith("info: "))
+        // Anything we're about to drop must not affect line tracking, or a suppressed entry
+        // would leave us believing the console is mid-line when it isn't.
+        if (!isVerboseLog || Program.Settings.VerboseLogging)
+        {
+            // The RT4K doesn't always terminate its last line, notably when it drops out
+            // mid-reply on power off. Whoever writes next would otherwise be appended to that
+            // dangling text, producing runs like "Serial Remote: pwrstatus". A change of colour
+            // means a change of source, and two sources never belong on one line.
+            if (!atLineStart && entryColor != lastColor)
+            {
+                oldOut.Write("\x1B[0m");
+                oldOut.Write(Environment.NewLine);
+                Log.Enqueue(new(Environment.NewLine, lastColor));
+                logSize += Environment.NewLine.Length;
+            }
+
+            lastColor = entryColor;
+            atLineStart = entryText.EndsWith('\n');
+        }
+
+        if (isVerboseLog)
         {
             if (Program.Settings.VerboseLogging)
             {
@@ -55,7 +104,6 @@ public class Logger : TextWriter
                 entryColor = ConsoleColor.DarkGray;
                 oldOut.Write("\x1B[39m\x1B[2m"); // Default color, dim
             }
-            isVerboseLog = true;
         }
         else
         {

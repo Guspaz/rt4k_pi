@@ -54,7 +54,17 @@ public class Serial
     private readonly Lock echoLock = new();
     private List<(string Text, ConsoleColor Color)>? echoCapture;
 
+    // While set, device text is discarded rather than logged. Used by timer-driven sessions
+    // whose chatter would otherwise bury everything else in the debug log.
+    private bool echoMuted;
+
     private event Action<string>? LineReceived;
+
+    /// <summary>
+    /// Every line the device sends, including replies to commands issued elsewhere. Lets
+    /// listeners react to device-initiated activity without owning the command plane.
+    /// </summary>
+    public event Action<string>? LineObserved;
 
     // Non-null only while a binary (RTL1) session is open
     private Channel<Rtl1Frame>? frames;
@@ -311,6 +321,7 @@ public class Serial
         try
         {
             LineReceived?.Invoke(line);
+            LineObserved?.Invoke(line);
         }
         catch (Exception ex)
         {
@@ -383,15 +394,24 @@ public class Serial
     {
         lock (echoLock)
         {
+            // A quiet session drops its text outright: unlike echoCapture there is nothing to
+            // replay later, and the session's trailing "[COM] <verb> done" arrives long after
+            // the opening command's capture has been flushed.
+            if (echoMuted)
+            {
+                return;
+            }
+
             if (echoCapture != null)
             {
                 echoCapture.Add((text, color));
                 return;
             }
 
-            Console.ForegroundColor = color;
-            Console.Write(text);
-            Console.ResetColor();
+            // Pass the colour explicitly rather than via Console.ForegroundColor: that is a
+            // process-global that other writers reset out from under us, which randomly stripped
+            // the colour off sent commands.
+            Logger.Write(text, color);
         }
     }
 
@@ -433,7 +453,7 @@ public class Serial
     public async Task<List<string>> SendCommandAsync(string command, Func<string, bool>? isTerminal = null, int timeoutMs = 1000, CancellationToken token = default, Func<List<string>, bool>? echoIf = null)
     {
         // A binary session owns the wire for its duration: an ASCII command sent into an open
-        // RTL1 stream desyncs it and the transfer dies on a timeout. Wait our turn.
+        // RTL1 stream desyncs it and the transfer dies on a timeout, so wait our turn.
         await sessionLock.WaitAsync(token);
 
         try
@@ -579,7 +599,7 @@ public class Serial
     /// Stream (or expose a chunked/ranged API) instead of materialising a byte[]. Needed before
     /// the FUSE/SMB layer can serve arbitrary files rather than small config blobs.
     /// </remarks>
-    public async Task<byte[]> GetFileAsync(string path, long offset = 0, long length = 0, CancellationToken token = default)
+    public async Task<byte[]> GetFileAsync(string path, long offset = 0, long length = 0, CancellationToken token = default, bool quiet = false)
     {
         string command = "get" + (offset > 0 ? $" -o {offset}" : "") + (length > 0 ? $" -l {length}" : "") + $" {path}";
 
@@ -594,7 +614,7 @@ public class Serial
             }
 
             return data;
-        }, token);
+        }, token, quiet: quiet);
     }
 
     /// <summary>Reads the entire live RT4K_state struct out of the device's RAM.</summary>
@@ -602,14 +622,15 @@ public class Serial
         => await RunSessionAsync("sget", "sget", "get done", async ready => await ReceiveAsync(ParseNonce(ready), token), token);
 
     /// <summary>Downloads the custom OSD glyph ROM (4096 bytes).</summary>
-    public async Task<byte[]> GetFontAsync(CancellationToken token = default)
-        => await RunSessionAsync("font", "font", "font done", async ready => await ReceiveAsync(ParseNonce(ready), token), token);
+    /// <remarks>The device closes this session with "get done", not "font done".</remarks>
+    public async Task<byte[]> GetFontAsync(CancellationToken token = default, bool quiet = false)
+        => await RunSessionAsync("font", "font", "get done", async ready => await ReceiveAsync(ParseNonce(ready), token), token, quiet: quiet);
 
     /// <summary>
     /// Mirrors the on-screen OSD grid. Returns the text and color planes plus the ready line's
     /// fields (rows/stride/width/cells for the main plane, rows/cols/on/osk for the aux plane).
     /// </summary>
-    public async Task<(byte[] Text, byte[] Color, Dictionary<string, string> Info)> GetOsdAsync(bool aux = false, CancellationToken token = default)
+    public async Task<(byte[] Text, byte[] Color, Dictionary<string, string> Info)> GetOsdAsync(bool aux = false, CancellationToken token = default, bool quiet = false)
     {
         string verb = aux ? "osd2" : "osd";
 
@@ -625,7 +646,7 @@ public class Serial
 
             int half = data.Length / 2;
             return (data[..half], data[half..], info);
-        }, token);
+        }, token, quiet: quiet);
     }
 
     /// <summary>Round-trips a payload through the device's RTL1 loopback session (transport proof).</summary>
@@ -701,7 +722,7 @@ public class Serial
         }, token, terminalTimeoutMs: 15000);
     }
 
-    private async Task<T> RunSessionAsync<T>(string command, string verb, string terminalLine, Func<string, Task<T>> body, CancellationToken token, int terminalTimeoutMs = XferIdleMs)
+    private async Task<T> RunSessionAsync<T>(string command, string verb, string terminalLine, Func<string, Task<T>> body, CancellationToken token, int terminalTimeoutMs = XferIdleMs, bool quiet = false)
     {
         if (!IsConnected)
         {
@@ -717,6 +738,17 @@ public class Serial
             sessionLines = Channel.CreateUnbounded<string>();
             decoder.Reset();
 
+            // Callers that run on a timer pass quiet, so a once-a-second transfer doesn't bury
+            // everything else in the log. Verbose still shows the lot. The mute has to cover the
+            // whole session, not just the opening command, because the device's closing
+            // "[COM] <verb> done" arrives after that command has already returned.
+            bool print = !quiet || Program.Settings.VerboseLogging;
+
+            lock (echoLock)
+            {
+                echoMuted = !print;
+            }
+
             var replies = await SendCommandCoreAsync(command, line => line.StartsWith($"{verb} ready") || line.StartsWith($"{verb}:") || line.StartsWith($"{verb} err"), 2000, token, null);
             string ready = replies.LastOrDefault() ?? throw new SerialException($"{verb}: no response from the RT4K");
 
@@ -725,7 +757,11 @@ public class Serial
                 throw new SerialException(ready);
             }
 
-            Console.WriteLine($"[RTL1] {verb}: binary session started");
+            if (print)
+            {
+                Console.WriteLine($"[RTL1] {verb}: binary session started");
+            }
+
             binaryPhase = true;
 
             T result;
@@ -739,7 +775,10 @@ public class Serial
                 binaryPhase = false;
             }
 
-            Console.WriteLine($"[RTL1] {verb}: binary session finished");
+            if (print)
+            {
+                Console.WriteLine($"[RTL1] {verb}: binary session finished");
+            }
 
             // The device prints its terminal line on the text plane once the session closes
             await WaitForSessionLineAsync(terminalLine, verb, terminalTimeoutMs, token);
@@ -751,6 +790,12 @@ public class Serial
             binaryPhase = false;
             frames = null;
             sessionLines = null;
+
+            lock (echoLock)
+            {
+                echoMuted = false;
+            }
+
             sessionLock.Release();
         }
     }

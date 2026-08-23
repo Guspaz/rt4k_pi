@@ -19,6 +19,15 @@ public partial class SettingsDaemon
         set => SetProperty(ref _RemoteScale, value);
     }
 
+    // Client-side magnification of the mirrored OSD, as a percentage. The server always renders
+    // it 1:1, so changing this doesn't cost a re-capture.
+    private int _OsdScale = 200;
+    public int OsdScale
+    {
+        get => _OsdScale;
+        set => SetProperty(ref _OsdScale, value);
+    }
+
     private string _LatestVersion = Program.VERSION;
     public string LatestVersion
     {

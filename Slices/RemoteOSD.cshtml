@@ -2,7 +2,7 @@
 @implements IUsesLayout<_Layout, LayoutModel>
 
 @functions {
-    public LayoutModel LayoutModel => new() { Title = "Remote" };
+    public LayoutModel LayoutModel => new() { Title = "Remote / OSD" };
 
     protected override Task ExecuteSectionAsync(string name)
     {
@@ -11,16 +11,25 @@
     }
 }
 
-<div>
+<div style="position: relative;" id="remoteArea">
     <img style="width: 0px; position: absolute;" src="Static/rt4k_remote.avif" id="remote" />
     <img style="width: 0px; position: absolute; opacity: 0%;" src="Static/rt4k_remote_led.avif" usemap="#image-map" id="remoteLed" />
-    <div style="position: relative; left: 0px; margin-left: 10px;" id="scaleButtons">
+    <div style="position: absolute; top: 0px; left: 0px;" id="scaleButtons">
+        <p class="mb-1"><strong>Remote</strong></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(25); return false;" type="button">25%</button></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(33); return false;" type="button">33%</button></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(50); return false;" type="button">50%</button></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(66); return false;" type="button">66%</button></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(75); return false;" type="button">75%</button></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(100); return false;" type="button">100%</button></p>
+        <p class="mb-1 mt-3"><strong>OSD</strong></p>
+        <p><button class="@LayoutModel.ButtonClasses" onclick="handleOsdScale(100); return false;" type="button">100%</button></p>
+        <p><button class="@LayoutModel.ButtonClasses" onclick="handleOsdScale(200); return false;" type="button">200%</button></p>
+        <p><button class="@LayoutModel.ButtonClasses" onclick="handleOsdScale(300); return false;" type="button">300%</button></p>
+    </div>
+    <div style="position: absolute; top: 0px; left: 0px;" id="osdPanel">
+        <img id="osdImage" style="display: none; image-rendering: pixelated;" alt="RT4K OSD" />
+        <p id="osdStatus" class="text-muted">Waiting for the RT4K&hellip;</p>
     </div>
 </div>
 
@@ -81,6 +90,8 @@
     async function handleAreaClick(param) {
         blinkImage();
 
+        // No OSD refresh here: the server sees the device's own remote echo and pushes the
+        // new frame over /OsdStream by itself.
         await fetch(`/RemoteCommand/${param.replace(/\s/g, "")}`, { method: 'POST' });
     }
 
@@ -104,14 +115,23 @@
 
     let oldFactor = @(Model.Settings.RemoteScale);
 
+    // Natural width of the remote artwork; the height is taken from the image once it loads
+    const remoteWidth = 830;
+
     async function handleScale(factor) {
         const remoteImage = document.getElementById('remote');
         const ledImage = document.getElementById('remoteLed');
         const buttonDiv = document.getElementById('scaleButtons');
 
-        remoteImage.style.width = (830 * (factor / 100.0)) + "px";
-        ledImage.style.width = (830 * (factor / 100.0)) + "px";
-        buttonDiv.style.left = (830 * (factor / 100.0)) + "px";
+        const width = remoteWidth * (factor / 100.0);
+
+        remoteImage.style.width = width + "px";
+        ledImage.style.width = width + "px";
+
+        // The remote is absolutely positioned, so nothing else can infer its footprint
+        buttonDiv.style.left = width + "px";
+        document.getElementById('osdPanel').style.left = (width + 130) + "px";
+        resizeRemoteArea();
 
         imageMapResize();
 
@@ -123,5 +143,95 @@
         oldFactor = factor;
     }
 
+    // Absolutely positioned children contribute no height, so reserve it explicitly or the
+    // page's following content slides up underneath the remote.
+    function resizeRemoteArea() {
+        const remoteImage = document.getElementById('remote');
+
+        if (remoteImage.naturalWidth) {
+            const scaled = remoteImage.naturalHeight * (remoteImage.clientWidth / remoteImage.naturalWidth);
+            document.getElementById('remoteArea').style.height = scaled + "px";
+        }
+    }
+
+    document.getElementById('remote').addEventListener('load', resizeRemoteArea);
+
     handleScale(@Model.Settings.RemoteScale);
+
+    // The server renders the OSD 1:1, so magnification is purely a client-side resize
+    let osdFactor = @(Model.Settings.OsdScale);
+
+    async function handleOsdScale(factor) {
+        const previous = osdFactor;
+        osdFactor = factor;
+        applyOsdScale();
+
+        if (factor != previous) {
+            await fetch(`/UpdateSetting/OsdScale/${factor}`, { method: 'POST' });
+        }
+    }
+
+    function applyOsdScale() {
+        const image = document.getElementById('osdImage');
+
+        if (image.naturalWidth) {
+            image.style.width = (image.naturalWidth * (osdFactor / 100.0)) + "px";
+        }
+    }
+
+    // The OSD is composed server-side and pushed to us, so there is nothing to poll, rate limit
+    // or refresh after a keypress: the server watches the device's own remote echo and sends a
+    // new frame the moment one exists.
+    const osdMessages = {
+        Disconnected: 'Not connected to the RT4K.',
+        PoweredOff: 'The RT4K is off.',
+        Blank: 'Nothing is on screen.',
+        Error: 'OSD unavailable.',
+        Unknown: 'Waiting for the RT4K\u2026'
+    };
+
+    const osdStream = new EventSource('/OsdStream');
+
+    osdStream.onmessage = (event) => {
+        const frame = JSON.parse(event.data);
+        const image = document.getElementById('osdImage');
+        const status = document.getElementById('osdStatus');
+
+        if (!frame.image) {
+            image.style.display = 'none';
+            status.textContent = osdMessages[frame.state] || osdMessages.Unknown;
+            return;
+        }
+
+        image.onload = applyOsdScale;
+        image.src = 'data:image/png;base64,' + frame.image;
+        image.style.display = '';
+
+        // A frame is still shown when the OSD goes away, just dimmed, so say why
+        status.textContent = frame.state === 'Live' ? '' : (osdMessages[frame.state] || '');
+    };
+
+    osdStream.onerror = () => {
+        // EventSource reconnects on its own; just say so while it's down
+        document.getElementById('osdStatus').textContent = osdMessages.Error;
+    };
+
+    // Tells the server we're still here. Without this the mirror would keep polling the RT4K
+    // long after the page was closed, because a navigated-away SSE socket still looks writable
+    // to the server for tens of seconds.
+    function sendOsdHeartbeat() {
+        if (!document.hidden) {
+            fetch('/OsdWatch', { method: 'POST', keepalive: true }).catch(() => { });
+        }
+    }
+
+    sendOsdHeartbeat();
+    const osdHeartbeat = setInterval(sendOsdHeartbeat, 2000);
+
+    // Leaving the page: drop the stream and stop renewing so capture stops promptly
+    window.addEventListener('pagehide', () => {
+        clearInterval(osdHeartbeat);
+        osdStream.close();
+    });
+
 </script>

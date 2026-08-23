@@ -7,6 +7,9 @@ public class RT4K
     // Fields from the most recent successful "status" poll (see PROTOCOL.md, "status")
     public IReadOnlyDictionary<string, string> Status { get; private set; } = new Dictionary<string, string>();
 
+    /// <summary>Server-side mirror of the device's on-screen display.</summary>
+    public OsdMirror Osd { get; }
+
     private readonly Serial serial;
     private readonly CancellationTokenSource cts = new();
 
@@ -24,6 +27,7 @@ public class RT4K
     public RT4K(Serial serial)
     {
         this.serial = serial;
+        Osd = new OsdMirror(serial, this);
 
         // While the RT4K is in standby its dispatcher doesn't run: every command except
         // "pwr on" is silently discarded. That makes a "status" poll a reliable power probe.
@@ -35,6 +39,10 @@ public class RT4K
                 await Task.Delay(Power == PowerState.On ? PollIntervalOnMs : PollIntervalOffMs, cts.Token);
             }
         }, cts.Token);
+
+        // Captures on demand: idles until a page is watching, then follows the device's own
+        // remote echo so the mirror updates as soon as a keypress lands.
+        Task.Run(() => Osd.RunAsync(cts.Token), cts.Token);
     }
 
     ~RT4K()
@@ -232,63 +240,99 @@ public class RT4K
     };
 
     public void SendRemoteString(string remoteString)
-    {
-        if (Enum.TryParse(remoteString, true, out Remote remote))
-        {
-            if (remote == Remote.Power)
-            {
-                PowerToggle();
-                return;
-            }
+        => SendRemoteStringAsync(remoteString).GetAwaiter().GetResult();
 
-            SendRemote(remote);
-        }
-        else
+    public async Task SendRemoteStringAsync(string remoteString)
+    {
+        if (!Enum.TryParse(remoteString, true, out Remote remote))
         {
             Console.WriteLine($"Unrecognized remote string: {remoteString}");
+            return;
         }
+
+        if (remote == Remote.Power)
+        {
+            await PowerToggleAsync();
+            return;
+        }
+
+        await SendRemoteAsync(remote);
     }
 
-    public void SendRemote(Remote remote)
+    public void SendRemote(Remote remote) => SendRemoteAsync(remote).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Injects a remote key. This goes through the command plane rather than a raw write so it
+    /// can't land in the middle of an OSD/file binary session and get swallowed.
+    /// </summary>
+    public async Task SendRemoteAsync(Remote remote)
     {
-        serial.WriteLine("remote " + remoteLookup[remote]);
+        try
+        {
+            // The device echoes "[COM] Serial Remote: <key>" as soon as it parses the command.
+            // Matching on it lets the call return in milliseconds; without a terminal predicate
+            // the command plane waits out the whole timeout, which delays the post-keypress OSD
+            // refresh badly enough that the press looks like it did nothing.
+            await serial.SendCommandAsync(
+                "remote " + remoteLookup[remote],
+                line => line.Contains("Serial Remote:") || line.Contains("Serial Remote Bad Command"),
+                timeoutMs: 500);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to send remote key {remote}: {ex.Message}");
+        }
     }
 
     /// <summary>
     /// Wakes the RT4K. "pwr on" is the only command the standby dispatcher honours.
     /// </summary>
-    public void PowerOn()
+    public async Task PowerOnAsync()
     {
-        serial.WriteLine("pwr on");
+        try
+        {
+            await serial.SendCommandAsync("pwr on", timeoutMs: 500);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to power on the RT4K: {ex.Message}");
+            return;
+        }
 
         // Give the unit time to boot before we believe a status poll
-        Task.Delay(8000).ContinueWith(_ => RefreshPowerAsync());
+        _ = Task.Delay(8000).ContinueWith(_ => RefreshPowerAsync());
     }
+
+    public void PowerOn() => PowerOnAsync().GetAwaiter().GetResult();
 
     /// <summary>
     /// Puts the RT4K into standby by injecting the remote's power key.
     /// </summary>
-    public void PowerOff()
+    public async Task PowerOffAsync()
     {
-        SendRemote(Remote.Power);
+        await SendRemoteAsync(Remote.Power);
 
-        Task.Delay(3000).ContinueWith(_ => RefreshPowerAsync());
+        _ = Task.Delay(3000).ContinueWith(_ => RefreshPowerAsync());
     }
 
-    public void PowerToggle()
+    public void PowerOff() => PowerOffAsync().GetAwaiter().GetResult();
+
+    public async Task PowerToggleAsync()
     {
         // Make sure we're acting on a fresh reading rather than a stale poll
-        switch (RefreshPower())
+        switch (await RefreshPowerAsync())
         {
             case PowerState.On:
-                PowerOff();
+                await PowerOffAsync();
                 break;
             case PowerState.Off:
             case PowerState.Unknown:
-                PowerOn();
+                await PowerOnAsync();
                 break;
         }
     }
+
+    public void PowerToggle() => PowerToggleAsync().GetAwaiter().GetResult();
 
     /// <summary>
     /// Debug helper: writes 1 MB of random data to the SD card, reads it back, verifies it
