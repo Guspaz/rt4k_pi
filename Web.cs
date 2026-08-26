@@ -32,7 +32,6 @@ public partial class Program
         var embeddedProvider = new EmbeddedFileProvider(Assembly.GetExecutingAssembly(), "rt4k_pi");
 
         var contentProvider = new FileExtensionContentTypeProvider();
-        contentProvider.Mappings.Add(".avif", "image/avif"); // dotnet doesn't know about AVIF yet
 
         app.UseStaticFiles(new StaticFileOptions
         {
@@ -66,11 +65,11 @@ public partial class Program
         app.MapGet("/favicon.ico", () => Results.File(embeddedProvider.GetFileInfo("Static/favicon.ico").CreateReadStream(), "image/x-icon"));
 
         // Pages
-        app.MapGet("/", () => Results.Extensions.RazorSlice<Slices.Status, Slices.AppState>(appState));
-        app.MapGet("/RemoteOSD", () => Results.Extensions.RazorSlice<Slices.RemoteOSD, Slices.AppState>(appState));
-        app.MapGet("/Calculator", () => Results.Extensions.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
-        app.MapGet("/Settings", () => Results.Extensions.RazorSlice<Slices.Settings, Slices.AppState>(appState));
-        app.MapGet("/DebugLog", () => Results.Extensions.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
+        app.MapGet("/", () => Results.RazorSlice<Slices.Status, Slices.AppState>(appState));
+        app.MapGet("/RemoteOSD", () => Results.RazorSlice<Slices.RemoteOSD, Slices.AppState>(appState));
+        app.MapGet("/Calculator", () => Results.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
+        app.MapGet("/Settings", () => Results.RazorSlice<Slices.Settings, Slices.AppState>(appState));
+        app.MapGet("/DebugLog", () => Results.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
 
         // APIs
         app.MapGet("/GetUpdateStatus", () => Installer.GetStatus());

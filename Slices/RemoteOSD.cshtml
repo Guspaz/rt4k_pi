@@ -1,4 +1,4 @@
-﻿@inherits RazorSliceHttpResult<AppState>
+﻿@inherits RazorSlice<AppState>
 @implements IUsesLayout<_Layout, LayoutModel>
 
 @functions {
@@ -14,7 +14,7 @@
 <div style="position: relative;" id="remoteArea">
     <img style="width: 0px; position: absolute;" src="Static/rt4k_remote.avif" id="remote" />
     <img style="width: 0px; position: absolute; opacity: 0%;" src="Static/rt4k_remote_led.avif" usemap="#image-map" id="remoteLed" />
-    <div style="position: absolute; top: 0px; left: 0px;" id="scaleButtons">
+    <div style="position: absolute; top: 0px; left: 0px; width: 130px; box-sizing: border-box; padding: 0 12px; text-align: center;" id="scaleButtons">
         <p class="mb-1"><strong>Remote</strong></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(25); return false;" type="button">25%</button></p>
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleScale(33); return false;" type="button">33%</button></p>
@@ -118,6 +118,10 @@
     // Natural width of the remote artwork; the height is taken from the image once it loads
     const remoteWidth = 830;
 
+    // Width of the column between the remote and the OSD that holds the scale controls.
+    // Must match the inline width on #scaleButtons, which centres them within it.
+    const scaleColumnWidth = 130;
+
     async function handleScale(factor) {
         const remoteImage = document.getElementById('remote');
         const ledImage = document.getElementById('remoteLed');
@@ -130,7 +134,7 @@
 
         // The remote is absolutely positioned, so nothing else can infer its footprint
         buttonDiv.style.left = width + "px";
-        document.getElementById('osdPanel').style.left = (width + 130) + "px";
+        document.getElementById('osdPanel').style.left = (width + scaleColumnWidth) + "px";
         resizeRemoteArea();
 
         imageMapResize();
