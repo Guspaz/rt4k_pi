@@ -14,12 +14,17 @@
   <!--
     Only the Windows code path (WindowsSerialPort.cs) uses System.IO.Ports; on Linux
     we talk to /dev/ttyUSB* through a plain FileStream. Excluding the package from
-    non-Windows publishes keeps libSystem.IO.Ports.Native.so out of the output, so
-    the Linux deployable stays a single self-contained binary.
+    non-Windows builds keeps libSystem.IO.Ports.Native.so out of the publish output,
+    so the Linux deployable stays a single self-contained binary.
+
+    NOTE: this must key off the build host OS, not $(RuntimeIdentifier). The Linux
+    build server runs a bare 'dotnet publish' and lets the SDK infer linux-arm64,
+    but that inference happens after property evaluation, so RuntimeIdentifier is
+    still empty here. The RID check below only catches an explicit '-r' override.
   -->
   <PropertyGroup>
-    <UseSystemIOPorts Condition="'$(RuntimeIdentifier)' == '' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win'))">true</UseSystemIOPorts>
-    <UseSystemIOPorts Condition="'$(UseSystemIOPorts)' == ''">false</UseSystemIOPorts>
+    <UseSystemIOPorts>false</UseSystemIOPorts>
+    <UseSystemIOPorts Condition="$([MSBuild]::IsOSPlatform('Windows')) and ('$(RuntimeIdentifier)' == '' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win')))">true</UseSystemIOPorts>
     <DefineConstants Condition="'$(UseSystemIOPorts)' == 'true'">$(DefineConstants);USE_SYSTEM_IO_PORTS</DefineConstants>
   </PropertyGroup>
 
