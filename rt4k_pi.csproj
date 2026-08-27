@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -11,21 +11,31 @@
     <AllowUnsafeBlocks>False</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!--
+    Only the Windows code path (WindowsSerialPort.cs) uses System.IO.Ports; on Linux
+    we talk to /dev/ttyUSB* through a plain FileStream. Excluding the package from
+    non-Windows publishes keeps libSystem.IO.Ports.Native.so out of the output, so
+    the Linux deployable stays a single self-contained binary.
+  -->
+  <PropertyGroup>
+    <UseSystemIOPorts Condition="'$(RuntimeIdentifier)' == '' or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win'))">true</UseSystemIOPorts>
+    <UseSystemIOPorts Condition="'$(UseSystemIOPorts)' == ''">false</UseSystemIOPorts>
+    <DefineConstants Condition="'$(UseSystemIOPorts)' == 'true'">$(DefineConstants);USE_SYSTEM_IO_PORTS</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
+    <PackageReference Include="LTRData.FuseDotNet" Version="1.0.0.14" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.11" />
     <PackageReference Include="RazorSlices" Version="0.11.3" />
-    <PackageReference Include="System.IO.Ports" Version="10.0.11" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.11" Condition="'$(UseSystemIOPorts)' == 'true'" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseSystemIOPorts)' != 'true'">
+    <Compile Remove="WindowsSerialPort.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Static/**" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="FuseDotNet\**" />
-    <Content Remove="FuseDotNet\**" />
-    <EmbeddedResource Remove="FuseDotNet\**" />
-    <None Remove="FuseDotNet\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -36,10 +46,6 @@
     <None Remove="Static\rt4k_remote_led.avif" />
     <None Remove="Static\vic_timings.js" />
     <None Remove="Static\w3.css" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="FuseDotNet\FuseDotNet.csproj" />
   </ItemGroup>
 
 </Project>

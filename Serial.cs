@@ -122,7 +122,11 @@ public class Serial
                             }
                             else
                             {
+#if USE_SYSTEM_IO_PORTS
                                 port = WindowsSerialPort.OpenAndConfigure(currentPort, baudRate);
+#else
+                                throw new PlatformNotSupportedException("System.IO.Ports is excluded from non-Windows builds.");
+#endif
                             }
                             Console.WriteLine($"Connected to {currentPort}");
                             IsConnected = true;
@@ -173,7 +177,11 @@ public class Serial
     {
         if (isWindows)
         {
+#if USE_SYSTEM_IO_PORTS
             return WindowsSerialPort.FindPort();
+#else
+            return null;
+#endif
         }
         else
         {
