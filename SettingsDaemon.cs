@@ -35,6 +35,19 @@ public partial class SettingsDaemon
         set => SetProperty(ref _LatestVersion, value);
     }
 
+    // Name of the attached scaler, used wherever the UI would otherwise hard-code "RT4K".
+    // Persisted so a restart doesn't fall back to the generic name until the first poll lands,
+    // and only knowable at all once the device has answered a "status".
+    private string _ModelName = DefaultModelName;
+    public string ModelName
+    {
+        get => _ModelName;
+        set => SetProperty(ref _ModelName, value);
+    }
+
+    /// <summary>Stand-in used until a device has told us what it actually is.</summary>
+    public const string DefaultModelName = "RetroTINK";
+
     private bool _VerboseLogging = false;
     public bool VerboseLogging
     {

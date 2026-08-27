@@ -1,0 +1,87 @@
+@inherits RazorSlice<AppState>
+
+@* Rendered both inline by Status.cshtml and by /RT4KStatusStream, so the live updates and the
+   first paint can never drift apart. *@
+
+@functions {
+	private string FormatTimeSpan(TimeSpan span) =>
+		$"{(span.Days > 0 ? $"{span.Days} day{(span.Days > 1 ? "s" : "")}, " : "")}" +
+		$"{(span.Hours > 0 ? $"{span.Hours} hour{(span.Hours > 1 ? "s" : "")}, " : "")}" +
+		$"{(span.Minutes > 0 ? $"{span.Minutes} minute{(span.Minutes > 1 ? "s" : "")}, " : "")}" +
+		$"{span.Seconds} second{(span.Seconds != 1 ? "s" : "")}".TrimEnd(',', ' ');
+}
+
+<tr><th style="width: 25%;">Power</th><td>@(Model.RT4K?.Power.ToString() ?? "Unknown")</td></tr>
+
+@* Every field below comes from the last "status" poll, which only answers while the
+   device is awake. In standby the cached values are stale, so they're hidden. *@
+@if (Model.RT4K?.Power == rt4k_pi.RT4K.PowerState.On)
+{
+	var rt4k = Model.RT4K;
+
+	@if (rt4k.Model != null)
+	{
+		<tr><th>Model</th><td>@rt4k.Model</td></tr>
+	}
+
+	@if (rt4k.Firmware != null)
+	{
+		<tr><th>Firmware</th><td>@rt4k.Firmware@(rt4k.BuildTag != null ? $" ({rt4k.BuildTag})" : "")</td></tr>
+	}
+
+	@if (rt4k.Input != null)
+	{
+		<tr><th>Input</th><td>@rt4k.Input</td></tr>
+	}
+
+	@* Only meaningful on the analog inputs, so the digital ones report "None" instead *@
+	@if (rt4k.InputChip is string chip && chip != "None")
+	{
+		<tr><th>Input Chip</th><td>@chip</td></tr>
+	}
+
+	@if (rt4k.Output != null)
+	{
+		<tr><th>Output</th><td>@rt4k.Output</td></tr>
+	}
+
+	<tr><th>Profile</th><td>@(rt4k.Profile ?? "None loaded")</td></tr>
+
+	@if (rt4k.SdCardPresent != null)
+	{
+		<tr><th>SD Card</th>
+			@if (rt4k.SdCardPresent == true)
+			{
+				<td>&#x2705; Present</td>
+			}
+			else
+			{
+				<td>&#x274C; Not detected</td>
+			}
+		</tr>
+	}
+
+	@if (rt4k.Uptime != null)
+	{
+		<tr><th>Uptime</th><td>@FormatTimeSpan(rt4k.Uptime.Value)</td></tr>
+	}
+
+	@if (rt4k.Baud != null)
+	{
+		<tr><th>Serial Speed</th><td>@(rt4k.Baud.Value.ToString("N0")) baud</td></tr>
+	}
+
+	@if (rt4k.SerialErrors != null)
+	{
+		<tr><th>Serial Errors</th>
+			@if (rt4k.SerialErrors == 0)
+			{
+				<td>&#x2705; None</td>
+			}
+			else
+			{
+				<td>&#x274C; @rt4k.SerialErrors dropped</td>
+			}
+		</tr>
+	}
+}

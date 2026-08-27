@@ -53,7 +53,7 @@
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         <tr><th style="width: 25%;">rt4k_pi</th><td>v@(rt4k_pi.Program.VERSION)</td></tr>
         <tr><th>Runtime</th><td>@System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription</td></tr>
-        <tr><th>RT4K Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
+        <tr><th>@rt4k_pi.RT4K.DisplayName Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
         <tr><th>IP Address</th><td>@localIP</td></tr>
         <tr><th>Hostname</th><td>@(Model.StatusDaemon.Hostname).local</td></tr>
 
@@ -70,13 +70,26 @@
     </table>
 </div>
 
-<h2>RT4K</h2>
+<h2>Scaler</h2>
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">Power</th><td>@(Model.RT4K?.Power.ToString() ?? "Unknown")</td></tr>
+        <tbody id='rt4kStatus'>
+            @(await RenderPartialAsync<RT4KStatusRows, AppState>(Model))
+        </tbody>
     </table>
 </div>
+
+@* The poll runs on the back end, so the rows are pushed as pre-rendered HTML rather than
+   duplicating the formatting in JavaScript. *@
+<script>
+    (function () {
+        const body = document.getElementById('rt4kStatus');
+        const stream = new EventSource('/RT4KStatusStream');
+
+        stream.onmessage = e => body.innerHTML = JSON.parse(e.data).rows;
+    })();
+</script>
 
 <h2>WiFi</h2>
 

@@ -28,8 +28,8 @@
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleOsdScale(300); return false;" type="button">300%</button></p>
     </div>
     <div style="position: absolute; top: 0px; left: 0px;" id="osdPanel">
-        <img id="osdImage" style="display: none; image-rendering: pixelated;" alt="RT4K OSD" />
-        <p id="osdStatus" class="text-muted">Waiting for the RT4K&hellip;</p>
+        <img id="osdImage" style="display: none; image-rendering: pixelated;" alt="@rt4k_pi.RT4K.DisplayName OSD" />
+        <p id="osdStatus" class="text-muted" data-scaler="@rt4k_pi.RT4K.DisplayName">Waiting for the @rt4k_pi.RT4K.DisplayName&hellip;</p>
     </div>
 </div>
 
@@ -186,12 +186,14 @@
     // The OSD is composed server-side and pushed to us, so there is nothing to poll, rate limit
     // or refresh after a keypress: the server watches the device's own remote echo and sends a
     // new frame the moment one exists.
+    const scaler = document.getElementById('osdStatus').dataset.scaler;
+
     const osdMessages = {
-        Disconnected: 'Not connected to the RT4K.',
-        PoweredOff: 'The RT4K is off.',
+        Disconnected: `Not connected to the ${scaler}.`,
+        PoweredOff: `The ${scaler} is off.`,
         Blank: 'Nothing is on screen.',
         Error: 'OSD unavailable.',
-        Unknown: 'Waiting for the RT4K\u2026'
+        Unknown: `Waiting for the ${scaler}\u2026`
     };
 
     const osdStream = new EventSource('/OsdStream');

@@ -7,7 +7,7 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>RT4K - @Model.Title</title>
+        <title>@rt4k_pi.RT4K.DisplayName - @Model.Title</title>
         <link rel="stylesheet" href="/Static/w3.css">
         @await RenderSectionAsync("ExtraHeaders")
     </head>
@@ -15,7 +15,7 @@
         <!-- Sidebar -->
         <div class="w3-sidebar w3-light-gray w3-card-4" style="width: 190px; display: block;">
             <div class="w3-bar-block w3-win8-steel w3-padding-16 w3-center">
-                <b>RT4K</b>
+                <b>@rt4k_pi.RT4K.DisplayName</b>
             </div>
             <div class="w3-bar-block">
                 <a href="/" class="w3-bar-item w3-button" style="@(Model.Title == "Status" ? selected : "")">Status</a>

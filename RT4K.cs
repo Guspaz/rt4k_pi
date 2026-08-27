@@ -7,6 +7,191 @@ public class RT4K
     // Fields from the most recent successful "status" poll (see PROTOCOL.md, "status")
     public IReadOnlyDictionary<string, string> Status { get; private set; } = new Dictionary<string, string>();
 
+    /// <summary>
+    /// Bumped on every completed poll, so a client can wait for fresh data rather than polling
+    /// on its own schedule and drifting out of step with the device.
+    /// </summary>
+    public long Revision { get; private set; }
+
+    // Completed and replaced on every poll, so listeners can await the next one instead of
+    // polling. RunContinuationsAsynchronously keeps waiters off the poll loop's thread.
+    private volatile TaskCompletionSource changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Completes once a poll newer than <paramref name="seen"/> has landed. Returns at once
+    /// if that has already happened.
+    /// </summary>
+    public async Task WaitForChangeAsync(long seen, CancellationToken token)
+    {
+        while (Revision == seen && !token.IsCancellationRequested)
+        {
+            // Captured before re-checking Revision, so a change in between can't be missed
+            Task next = changed.Task;
+
+            if (Revision != seen)
+            {
+                return;
+            }
+
+            await next.WaitAsync(token);
+        }
+    }
+
+    /// <summary>
+    /// Publishes the newly polled state and wakes anyone waiting on it. Called on every poll
+    /// rather than only on a detected change, since uptime moves each time anyway.
+    /// </summary>
+    private void Publish()
+    {
+        Revision++;
+
+        // Release anyone waiting on the old revision and arm the next wait
+        TaskCompletionSource previous = changed;
+        changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        previous.TrySetResult();
+    }
+
+    /// <summary>Firmware version, e.g. "1.75.0".</summary>
+    public string? Firmware => Field("fw");
+
+    /// <summary>Firmware build tag, e.g. "f0807m".</summary>
+    public string? BuildTag => Field("tag");
+
+    /// <summary>Device model name, e.g. "RT4K Pro".</summary>
+    public string? Model => ModelName(Number("model"));
+
+    /// <summary>
+    /// What to call the attached scaler in the UI and the logs. Falls back to the last model
+    /// seen (or a generic name on a first run) so it reads sensibly before the device answers.
+    /// </summary>
+    public static string DisplayName => Program.Settings.ModelName;
+
+    /// <summary>Name of the selected video input, e.g. "HD15 RGBHV".</summary>
+    public string? Input => InputName(Number("input_source"));
+
+    /// <summary>Video decoder handling the current input, e.g. "TVP7002".</summary>
+    public string? InputChip => InputChipName(Number("input_ic"));
+
+    /// <summary>Selected HDMI output mode, e.g. "1080p60 (1920x1080)".</summary>
+    public string? Output => OutputName(Number("output_res"));
+
+    /// <summary>Loaded profile name, or null when none is loaded.</summary>
+    public string? Profile
+    {
+        get
+        {
+            string? profile = Field("profile");
+
+            // The device reports the literal string "none" rather than omitting the field
+            return string.IsNullOrEmpty(profile) || profile == "none" ? null : profile;
+        }
+    }
+
+    /// <summary>True when the device reports an SD card is present.</summary>
+    public bool? SdCardPresent => Number("sd") is int sd ? sd == 1 : null;
+
+    /// <summary>How long the RT4K has been awake, or null if it hasn't reported yet.</summary>
+    public TimeSpan? Uptime => Number("uptime_s") is int seconds ? TimeSpan.FromSeconds(seconds) : null;
+
+    /// <summary>Negotiated baud rate of the serial link the poll came in on.</summary>
+    public int? Baud => Number("baud");
+
+    /// <summary>
+    /// Total of every dropped-data counter the device reports. Non-zero means the link is
+    /// losing bytes, so it's worth surfacing even though the individual counters aren't.
+    /// </summary>
+    public int? SerialErrors
+    {
+        get
+        {
+            string[] counters = ["oerr", "ring_drop", "queue_drop", "linedrop", "u5oerr"];
+
+            // All five appear on the same line, so either the poll saw it or it saw none of them
+            return counters.Any(counter => Number(counter) != null)
+                ? counters.Sum(counter => Number(counter) ?? 0)
+                : null;
+        }
+    }
+
+    private string? Field(string key) => Status.TryGetValue(key, out string? value) ? value : null;
+
+    private int? Number(string key) => int.TryParse(Field(key), out int value) ? value : null;
+
+    // PROTOCOL.md, "Model map". Underscores are cosmetic here, so they're spaced out.
+    private static string? ModelName(int? model) => model switch
+    {
+        0 => "RT4K Pro",
+        1 => "RT4K CE",
+        2 => "RT6X Pro",
+        3 => "RT6X CE",
+        null => null,
+        _ => $"Unknown ({model})"
+    };
+
+    // PROTOCOL.md, "Input enum -> name map". Headers and spacers can't be selected, so they
+    // should never show up here, but they're mapped rather than silently shown as a bare number.
+    private static string? InputName(int? input) => input switch
+    {
+        0 => "HDMI",
+        3 => "Front CVBS",
+        4 => "Front Y/C",
+        7 => "RCA YPbPr",
+        8 => "RCA RGsB",
+        9 => "RCA CVBS on G",
+        12 => "SCART RGBS",
+        13 => "SCART RGsB",
+        14 => "SCART YPbPr",
+        15 => "SCART CVBS",
+        16 => "SCART CVBS on G",
+        17 => "SCART Y/C",
+        20 => "HD15 RGBHV",
+        21 => "HD15 RGBS",
+        22 => "HD15 RGsB",
+        23 => "HD15 YPbPr",
+        24 => "HD15 CVBS on Hs",
+        25 => "HD15 CVBS on G",
+        26 => "HD15 Y/C on G/R",
+        27 => "Enhanced Y/C",
+        null => null,
+        _ => $"Unknown ({input})"
+    };
+
+    // PROTOCOL.md, "input_ic": which decoder chip is handling the selected source
+    private static string? InputChipName(int? chip) => chip switch
+    {
+        0 => "None",
+        1 => "TVP7002",
+        2 => "TW9912",
+        3 => "ADV7611",
+        null => null,
+        _ => $"Unknown ({chip})"
+    };
+
+    // PROTOCOL.md, "Output mode map". 16-68 are invalid; 69-74 are custom modeline slots
+    // whose real dimensions depend on the loaded file, so they're reported by slot number.
+    private static string? OutputName(int? output) => output switch
+    {
+        0 => "2160p60 (3840x2160)",
+        1 => "2160p50 (3840x2160)",
+        2 => "1080p60 (1920x1080)",
+        3 => "1080p50 (1920x1080)",
+        4 => "1440p60 (2560x1440)",
+        5 => "1440p50 (2560x1440)",
+        6 => "1080p100 (1920x1080)",
+        7 => "1440p100 (2560x1440)",
+        8 => "1080p120 (1920x1080)",
+        9 => "1440p120 (2560x1440)",
+        10 => "1080p144 (1920x1080)",
+        11 => "1440p144 (2560x1440)",
+        12 => "720p (1280x720)",
+        13 => "480p (720x480)",
+        14 => "240p (1440x240)",
+        15 => "240p120 (1440x240)",
+        >= 69 and <= 74 => $"Custom slot {output - 68}",
+        null => null,
+        _ => $"Unknown ({output})"
+    };
+
     /// <summary>Server-side mirror of the device's on-screen display.</summary>
     public OsdMirror Osd { get; }
 
@@ -57,7 +242,10 @@ public class RT4K
     {
         if (!serial.IsConnected)
         {
-            return Power = PowerState.Unknown;
+            Power = PowerState.Unknown;
+            Publish();
+
+            return Power;
         }
 
         try
@@ -82,16 +270,30 @@ public class RT4K
             {
                 if (Power != PowerState.Off)
                 {
-                    Console.WriteLine("RT4K is not responding, assuming it's in standby");
+                    Console.WriteLine($"{DisplayName} is not responding, assuming it's in standby");
                 }
 
-                return Power = PowerState.Off;
+                Power = PowerState.Off;
+                Publish();
+
+                return Power;
             }
 
             var fields = new Dictionary<string, string>();
 
             foreach (string line in status)
             {
+                // "status profile=<name>" is always last and its value is the whole line
+                // remainder: profile names may contain spaces, so splitting on whitespace
+                // would truncate them at the first word.
+                const string profilePrefix = "status profile=";
+
+                if (line.StartsWith(profilePrefix))
+                {
+                    fields["profile"] = line[profilePrefix.Length..].Trim();
+                    continue;
+                }
+
                 foreach (var field in Serial.ParseFields(line))
                 {
                     fields[field.Key] = field.Value;
@@ -100,17 +302,33 @@ public class RT4K
 
             Status = fields;
 
-            if (Power != PowerState.On)
+            // Remembered across restarts so the UI isn't stuck on the generic name until the
+            // first poll of the next run lands. Unknown ids are skipped: caching "Unknown (5)"
+            // would be worse than the generic fallback. The equality check keeps a poll that saw
+            // the same model out of the settings log; the save itself is already change-gated.
+            if (Model is string model && !model.StartsWith("Unknown") && model != Program.Settings.ModelName)
             {
-                Console.WriteLine($"RT4K is on (fw {fields.GetValueOrDefault("fw", "unknown")})");
+                Program.Settings.ModelName = model;
             }
 
-            return Power = PowerState.On;
+            if (Power != PowerState.On)
+            {
+                Console.WriteLine($"{DisplayName} is on (fw {fields.GetValueOrDefault("fw", "unknown")})");
+            }
+
+            Power = PowerState.On;
+            Publish();
+
+            return Power;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error polling RT4K status: {ex.Message}");
-            return Power = PowerState.Unknown;
+            Console.WriteLine($"Error polling {DisplayName} status: {ex.Message}");
+
+            Power = PowerState.Unknown;
+            Publish();
+
+            return Power;
         }
     }
 
@@ -295,7 +513,7 @@ public class RT4K
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to power on the RT4K: {ex.Message}");
+            Console.WriteLine($"Failed to power on the {DisplayName}: {ex.Message}");
             return;
         }
 
@@ -396,7 +614,7 @@ public class RT4K
         }
         finally
         {
-            //await serial.SendCommandAsync($"rm {path}", line => line.StartsWith("rm "), token: token);
+            await serial.SendCommandAsync($"rm {path}", line => line.StartsWith("rm "), token: token);
         }
     }
 }

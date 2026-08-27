@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 using rt4k_pi.Slices;
 using System.Reflection;
+using System.Text.Json;
 
 public partial class Program
 {
@@ -102,7 +103,7 @@ public partial class Program
 
         // Server-sent events: the mirror pushes a frame whenever it actually changes, so the
         // browser needs no polling, no rate limiting and no post-keypress refresh logic.
-        app.MapGet("/OsdStream", async (HttpContext context) =>
+        app.MapGet("/OsdStream", async context =>
         {
             if (RT4K is null)
             {
@@ -168,6 +169,71 @@ public partial class Program
             }
         });
 
+        // Server-sent events for the status page's RT4K table: the poll runs on the back end,
+        // so the rows are rendered here and pushed only when the reported state actually changes.
+        app.MapGet("/RT4KStatusStream", async context =>
+        {
+            if (RT4K is null)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
+            context.Response.Headers.ContentType = "text/event-stream";
+            context.Response.Headers.CacheControl = "no-cache,no-store";
+            context.Response.Headers["X-Accel-Buffering"] = "no";
+
+            CancellationToken token = context.RequestAborted;
+
+            // The page was served with the current rows already in place, so the first push is
+            // only worth making once something has moved on from that.
+            long sent = RT4K.Revision;
+
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    // Read the revision first so a poll landing between these two lines re-sends
+                    // the same rows next pass rather than recording one that was never sent.
+                    long revision = RT4K.Revision;
+
+                    if (revision != sent)
+                    {
+                        sent = revision;
+
+                        var writer = new StringWriter();
+                        await Slices.RT4KStatusRows.Create(appState).RenderAsync(writer, cancellationToken: token);
+
+                        await context.Response.WriteAsync($"data: {{\"rows\":\"{JsonEncodedText.Encode(writer.ToString())}\"}}\n\n", token);
+                    }
+                    else
+                    {
+                        // Ignored by EventSource, so an idle stream stays open without re-sending
+                        // rows the page already has.
+                        await context.Response.WriteAsync(": keepalive\n\n", token);
+                    }
+
+                    await context.Response.Body.FlushAsync(token);
+
+                    using var idle = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    idle.CancelAfter(KeepAliveMs);
+
+                    try
+                    {
+                        await RT4K.WaitForChangeAsync(sent, idle.Token);
+                    }
+                    catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                    {
+                        // Nothing changed for a while; loop round to emit a keep-alive
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Page navigated away
+            }
+        });
+
         app.MapPost("/RemoteCommand/{cmd}", async ([FromRoute] string cmd) =>
         {
             if (RT4K is not null)
@@ -178,7 +244,7 @@ public partial class Program
 
         app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value) );
         app.MapPost("/InstallUpdate", () => Installer.DoUpdate());
-        app.MapPost("/RunBenchmark", async () => RT4K is null ? "RT4K not available" : await RT4K.BenchmarkAsync());
+        app.MapPost("/RunBenchmark", async () => RT4K is null ? $"{rt4k_pi.RT4K.DisplayName} not available" : await RT4K.BenchmarkAsync());
 
         Console.WriteLine("rt4k_pi startup complete.");
 

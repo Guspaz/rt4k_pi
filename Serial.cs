@@ -472,7 +472,7 @@ public class Serial
     {
         if (!IsConnected)
         {
-            throw new SerialException("Not connected to the RT4K");
+            throw new SerialException($"Not connected to the {RT4K.DisplayName}");
         }
 
         await commandLock.WaitAsync(token);
@@ -726,7 +726,7 @@ public class Serial
     {
         if (!IsConnected)
         {
-            throw new SerialException("Not connected to the RT4K");
+            throw new SerialException($"Not connected to the {RT4K.DisplayName}");
         }
 
         await sessionLock.WaitAsync(token);
@@ -750,7 +750,7 @@ public class Serial
             }
 
             var replies = await SendCommandCoreAsync(command, line => line.StartsWith($"{verb} ready") || line.StartsWith($"{verb}:") || line.StartsWith($"{verb} err"), 2000, token, null);
-            string ready = replies.LastOrDefault() ?? throw new SerialException($"{verb}: no response from the RT4K");
+            string ready = replies.LastOrDefault() ?? throw new SerialException($"{verb}: no response from the {RT4K.DisplayName}");
 
             if (!ready.StartsWith($"{verb} ready"))
             {
