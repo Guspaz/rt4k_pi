@@ -1,5 +1,7 @@
 # Readme
 
+*Disclaimer: This project was developed with the assistance of AI as of commit 036ab16.*
+
 This project is intended to replace the rt4k_esp32 project after the manufacturer rugpulled me and downgraded the microcontroller after I bought my initial unit. It's a work-in-progress and is not yet fit for public consumption.
 
 It's designed to run on the Raspberry Pi Zero 2 W (Pi02W), and only the Pi02W: the Zero 2 is the only model that has "unlimited" power output due to having a direct shunt between the USB power input and output, and we need the W version to be able to communicate with it over wifi. You connect the RT4K power supply to the Pi02W power input, and the RT4K itself to the other Pi02W USB port.
