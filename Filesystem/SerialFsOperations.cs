@@ -40,8 +40,24 @@ internal class SerialFsOperations : IFuseOperations
         /// </summary>
         public Lock Gate { get; } = new();
 
-        /// <summary>The staged contents, materialised on the first write (or truncate).</summary>
+        /// <summary>
+        /// The staged contents, materialised on the first write (or truncate).
+        ///
+        /// This is a capacity buffer and is usually longer than the file: only the first
+        /// <see cref="Length"/> bytes are real. Never use Buffer.Length as the file size.
+        /// </summary>
         public byte[]? Buffer { get; set; }
+
+        /// <summary>
+        /// How much of <see cref="Buffer"/> is actually the file.
+        ///
+        /// Kept separate so a sequential write can grow the buffer geometrically instead of
+        /// reallocating to the exact size on every call. SMB delivers a large file in ~64 KB
+        /// writes, so exact-sizing meant one allocate-and-copy of the whole staged file per
+        /// chunk: quadratic in file size, and every array past 85 KB lands on the large object
+        /// heap, so it also fed a steady stream of gen-2 collections.
+        /// </summary>
+        public int Length { get; set; }
 
         public bool Dirty { get; set; }
 
@@ -367,6 +383,7 @@ internal class SerialFsOperations : IFuseOperations
             // before the card, so a stat between create and the first write is still answered.
             OpenFile file = Acquire(device);
             file.Buffer = [];
+            file.Length = 0;
             file.Dirty = true;
             fileInfo.Context = file;
 
@@ -399,7 +416,7 @@ internal class SerialFsOperations : IFuseOperations
             {
                 lock (stagedFile.Gate)
                 {
-                    stagedLength = stagedFile.Buffer?.Length;
+                    stagedLength = stagedFile.Buffer == null ? null : stagedFile.Length;
                 }
             }
 
@@ -468,6 +485,7 @@ internal class SerialFsOperations : IFuseOperations
             if (fileInfo.flags.HasFlag(PosixOpenFlags.Truncate))
             {
                 file.Buffer = [];
+                file.Length = 0;
                 file.Dirty = true;
             }
 
@@ -514,9 +532,9 @@ internal class SerialFsOperations : IFuseOperations
             {
                 lock (stagedFile.Gate)
                 {
-                    if (stagedFile.Buffer is byte[] staged && position < staged.Length)
+                    if (stagedFile.Buffer is byte[] staged && position < stagedFile.Length)
                     {
-                        int available = (int)Math.Min(staged.Length - position, buffer.Length);
+                        int available = (int)Math.Min(stagedFile.Length - position, buffer.Length);
                         staged.AsSpan((int)position, available).CopyTo(buffer.Span);
                         readLength = available;
                     }
@@ -716,14 +734,21 @@ internal class SerialFsOperations : IFuseOperations
 
             lock (file.Gate)
             {
-                byte[] buffer = LoadBuffer(file);
-                Array.Resize(ref buffer, (int)size);
-                file.Buffer = buffer;
+                LoadBuffer(file);
+                EnsureCapacity(file, (int)size);
+
+                // Extending by truncate also has to read back as zeroes
+                if (size > file.Length)
+                {
+                    file.Buffer!.AsSpan(file.Length, (int)size - file.Length).Clear();
+                }
+
+                file.Length = (int)size;
                 file.Dirty = true;
 
                 if (file.Handles == 0)
                 {
-                    Fs.Write(device, buffer);
+                    Fs.Write(device, StagedContents(file));
                     file.Dirty = false;
                 }
             }
@@ -785,15 +810,25 @@ internal class SerialFsOperations : IFuseOperations
 
             lock (file.Gate)
             {
-                byte[] staged = LoadBuffer(file);
+                LoadBuffer(file);
+                EnsureCapacity(file, (int)end);
 
-                if (end > staged.Length)
+                byte[] staged = file.Buffer!;
+
+                // A write past the end leaves a hole, which POSIX defines as reading back as
+                // zeroes. A grown buffer is already zeroed, but a reused one isn't.
+                if (position > file.Length)
                 {
-                    Array.Resize(ref staged, (int)end);
-                    file.Buffer = staged;
+                    staged.AsSpan(file.Length, (int)position - file.Length).Clear();
                 }
 
                 buffer.Span.CopyTo(staged.AsSpan((int)position));
+
+                if (end > file.Length)
+                {
+                    file.Length = (int)end;
+                }
+
                 file.Dirty = true;
                 writtenLength = buffer.Length;
             }
@@ -827,7 +862,8 @@ internal class SerialFsOperations : IFuseOperations
     /// The staged contents for a path, or null when nothing is being written to it.
     ///
     /// Returns the live array by reference, so callers that index into it must hold the file's
-    /// gate: a concurrent write can replace it with a larger copy at any moment.
+    /// gate: a concurrent write can replace it with a larger copy at any moment, and they must
+    /// bound reads by OpenFile.Length rather than Buffer.Length, which is only the capacity.
     /// </summary>
     private OpenFile? StagedFile(string devicePath)
     {
@@ -855,8 +891,38 @@ internal class SerialFsOperations : IFuseOperations
         SerialFsEntry? entry = Fs.Stat(file.DevicePath);
 
         file.Buffer = entry == null || entry.Size == 0 ? [] : Fs.Read(file.DevicePath, 0, entry.Size);
+        file.Length = file.Buffer.Length;
 
         return file.Buffer;
+    }
+
+    /// <summary>
+    /// Ensures the staging buffer can hold <paramref name="required"/> bytes, growing it by
+    /// doubling rather than to the exact size so a sequential write costs an amortised constant
+    /// number of copies instead of one per chunk.
+    /// </summary>
+    /// <remarks>Callers must hold the file's gate: this both reads and assigns Buffer.</remarks>
+    private static void EnsureCapacity(OpenFile file, int required)
+    {
+        byte[] staged = file.Buffer ?? [];
+
+        if (staged.Length >= required)
+        {
+            return;
+        }
+
+        // Start at 64 KB (one SMB write) so small files don't creep up from nothing, then double
+        int capacity = Math.Max(staged.Length, 64 * 1024);
+
+        while (capacity < required)
+        {
+            capacity *= 2;
+        }
+
+        // Only the live part is worth copying; the rest of the old buffer is uninitialised slack
+        var grown = new byte[capacity];
+        staged.AsSpan(0, file.Length).CopyTo(grown);
+        file.Buffer = grown;
     }
 
     /// <summary>Uploads a staged file if it has unwritten changes.</summary>
@@ -883,9 +949,25 @@ internal class SerialFsOperations : IFuseOperations
                 return;
             }
 
-            Fs.Write(devicePath, file.Buffer ?? []);
+            Fs.Write(devicePath, StagedContents(file));
             file.Dirty = false;
         }
+    }
+
+    /// <summary>
+    /// The live portion of the staging buffer, as the exact-sized array the transfer expects.
+    /// </summary>
+    /// <remarks>Callers must hold the file's gate.</remarks>
+    private static byte[] StagedContents(OpenFile file)
+    {
+        if (file.Buffer is not byte[] staged)
+        {
+            return [];
+        }
+
+        // The upload hashes and frames exactly what it's given, so the slack past Length must
+        // not go out: it would append garbage to the file on the card.
+        return staged.Length == file.Length ? staged : staged.AsSpan(0, file.Length).ToArray();
     }
 
     /// <summary>Fills in the stat structure ksmbd wants for one entry.</summary>
