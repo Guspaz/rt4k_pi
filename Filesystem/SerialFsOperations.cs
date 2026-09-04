@@ -28,6 +28,18 @@ internal class SerialFsOperations : IFuseOperations
     {
         public string DevicePath { get; set; } = devicePath;
 
+        /// <summary>
+        /// Guards this file's buffers and flags.
+        ///
+        /// openLock only covers the dictionary: two threads can hold the same OpenFile and race
+        /// on its contents, and the dangerous pair is Write resizing Buffer while another Write
+        /// or a flush is reading it. Holding this across a transfer also collapses the case where
+        /// several threads open the same file at once into one download instead of N.
+        ///
+        /// Always taken after openLock, never before, so the two can't deadlock.
+        /// </summary>
+        public Lock Gate { get; } = new();
+
         /// <summary>The staged contents, materialised on the first write (or truncate).</summary>
         public byte[]? Buffer { get; set; }
 
@@ -323,7 +335,7 @@ internal class SerialFsOperations : IFuseOperations
 
             // Everything on the card is readable and writable by everyone, so existence is
             // the only thing worth checking here
-            return Fs.Stat(device) != null || Staged(device) != null ? PosixResult.Success : PosixResult.ENOENT;
+            return Fs.Stat(device) != null || HasStaged(device) ? PosixResult.Success : PosixResult.ENOENT;
         }
         catch (Exception ex)
         {
@@ -377,13 +389,26 @@ internal class SerialFsOperations : IFuseOperations
         {
             string device = SerialFs.DevicePath(path);
             SerialFsEntry? entry = Fs.Stat(device);
+            OpenFile? stagedFile = StagedFile(device);
+
+            // Length is read under the gate: a concurrent write replaces Buffer with a larger
+            // array, and reporting a size from the old one understates the file.
+            int? stagedLength = null;
+
+            if (stagedFile != null)
+            {
+                lock (stagedFile.Gate)
+                {
+                    stagedLength = stagedFile.Buffer?.Length;
+                }
+            }
 
             if (entry == null)
             {
                 // A file that has been created but whose upload hasn't happened yet
-                if (Staged(device) is byte[] staged)
+                if (stagedLength is int length)
                 {
-                    stat = Describe(new SerialFsEntry(device, IsDirectory: false, staged.Length, 0), staged.Length);
+                    stat = Describe(new SerialFsEntry(device, IsDirectory: false, length, 0), length);
                     return PosixResult.Success;
                 }
 
@@ -391,7 +416,7 @@ internal class SerialFsOperations : IFuseOperations
             }
 
             // Staged writes are the truth until they're uploaded, so report their size
-            stat = Describe(entry, Staged(device)?.Length ?? entry.Size);
+            stat = Describe(entry, stagedLength ?? entry.Size);
 
             return PosixResult.Success;
         }
@@ -427,7 +452,7 @@ internal class SerialFsOperations : IFuseOperations
             string device = SerialFs.DevicePath(path);
             SerialFsEntry? entry = Fs.Stat(device);
 
-            if (entry == null && Staged(device) == null)
+            if (entry == null && !HasStaged(device))
             {
                 return PosixResult.ENOENT;
             }
@@ -485,13 +510,16 @@ internal class SerialFsOperations : IFuseOperations
             string device = SerialFs.DevicePath(path);
 
             // Anything staged in RAM is newer than what's on the card, so it wins
-            if (Staged(device) is byte[] staged)
+            if (StagedFile(device) is OpenFile stagedFile)
             {
-                if (position < staged.Length)
+                lock (stagedFile.Gate)
                 {
-                    int available = (int)Math.Min(staged.Length - position, buffer.Length);
-                    staged.AsSpan((int)position, available).CopyTo(buffer.Span);
-                    readLength = available;
+                    if (stagedFile.Buffer is byte[] staged && position < staged.Length)
+                    {
+                        int available = (int)Math.Min(staged.Length - position, buffer.Length);
+                        staged.AsSpan((int)position, available).CopyTo(buffer.Span);
+                        readLength = available;
+                    }
                 }
 
                 return PosixResult.Success;
@@ -519,21 +547,24 @@ internal class SerialFsOperations : IFuseOperations
             // so this is the case worth optimising for; Release drops the buffer again.
             OpenFile handle = fileInfo.Context as OpenFile ?? Acquire(device);
 
-            if (handle.ReadCache == null && entry.Size <= MaxFileSize)
+            lock (handle.Gate)
             {
-                handle.ReadCache = entry.Size == 0 ? [] : Fs.Read(device, 0, entry.Size);
-            }
-
-            if (handle.ReadCache is byte[] cached)
-            {
-                if (position < cached.Length)
+                if (handle.ReadCache == null && entry.Size <= MaxFileSize)
                 {
-                    int available = (int)Math.Min(cached.Length - position, buffer.Length);
-                    cached.AsSpan((int)position, available).CopyTo(buffer.Span);
-                    readLength = available;
+                    handle.ReadCache = entry.Size == 0 ? [] : Fs.Read(device, 0, entry.Size);
                 }
 
-                return PosixResult.Success;
+                if (handle.ReadCache is byte[] cached)
+                {
+                    if (position < cached.Length)
+                    {
+                        int available = (int)Math.Min(cached.Length - position, buffer.Length);
+                        cached.AsSpan((int)position, available).CopyTo(buffer.Span);
+                        readLength = available;
+                    }
+
+                    return PosixResult.Success;
+                }
             }
 
             // The device errors out on a range that runs past the end, so clamp it ourselves
@@ -683,15 +714,18 @@ internal class SerialFsOperations : IFuseOperations
             // temporarily and upload it on the spot.
             file ??= new OpenFile(device);
 
-            byte[] buffer = LoadBuffer(file);
-            Array.Resize(ref buffer, (int)size);
-            file.Buffer = buffer;
-            file.Dirty = true;
-
-            if (file.Handles == 0)
+            lock (file.Gate)
             {
-                Fs.Write(device, buffer);
-                file.Dirty = false;
+                byte[] buffer = LoadBuffer(file);
+                Array.Resize(ref buffer, (int)size);
+                file.Buffer = buffer;
+                file.Dirty = true;
+
+                if (file.Handles == 0)
+                {
+                    Fs.Write(device, buffer);
+                    file.Dirty = false;
+                }
             }
 
             return PosixResult.Success;
@@ -748,17 +782,21 @@ internal class SerialFsOperations : IFuseOperations
 
             string device = SerialFs.DevicePath(path);
             OpenFile file = fileInfo.Context as OpenFile ?? Acquire(device);
-            byte[] staged = LoadBuffer(file);
 
-            if (end > staged.Length)
+            lock (file.Gate)
             {
-                Array.Resize(ref staged, (int)end);
-                file.Buffer = staged;
-            }
+                byte[] staged = LoadBuffer(file);
 
-            buffer.Span.CopyTo(staged.AsSpan((int)position));
-            file.Dirty = true;
-            writtenLength = buffer.Length;
+                if (end > staged.Length)
+                {
+                    Array.Resize(ref staged, (int)end);
+                    file.Buffer = staged;
+                }
+
+                buffer.Span.CopyTo(staged.AsSpan((int)position));
+                file.Dirty = true;
+                writtenLength = buffer.Length;
+            }
 
             return PosixResult.Success;
         }
@@ -785,19 +823,28 @@ internal class SerialFsOperations : IFuseOperations
         }
     }
 
-    /// <summary>The staged contents for a path, or null when nothing is being written to it.</summary>
-    private byte[]? Staged(string devicePath)
+    /// <summary>
+    /// The staged contents for a path, or null when nothing is being written to it.
+    ///
+    /// Returns the live array by reference, so callers that index into it must hold the file's
+    /// gate: a concurrent write can replace it with a larger copy at any moment.
+    /// </summary>
+    private OpenFile? StagedFile(string devicePath)
     {
         lock (openLock)
         {
-            return openFiles.TryGetValue(devicePath, out OpenFile? file) ? file.Buffer : null;
+            return openFiles.TryGetValue(devicePath, out OpenFile? file) && file.Buffer != null ? file : null;
         }
     }
+
+    /// <summary>Whether a path has staged contents, for existence checks that don't read them.</summary>
+    private bool HasStaged(string devicePath) => StagedFile(devicePath) != null;
 
     /// <summary>
     /// Materialises the staging buffer, pulling the file's current contents down the first time
     /// so that a partial write doesn't discard the rest of it.
     /// </summary>
+    /// <remarks>Callers must hold the file's gate: this both reads and assigns Buffer.</remarks>
     private byte[] LoadBuffer(OpenFile file)
     {
         if (file.Buffer != null)
@@ -822,13 +869,23 @@ internal class SerialFsOperations : IFuseOperations
             openFiles.TryGetValue(devicePath, out file);
         }
 
-        if (file?.Dirty != true)
+        if (file == null)
         {
             return;
         }
 
-        Fs.Write(devicePath, file.Buffer ?? []);
-        file.Dirty = false;
+        // Held across the upload so a write can't resize Buffer out from under it, and so two
+        // threads closing the same file can't both decide it's dirty and upload it twice.
+        lock (file.Gate)
+        {
+            if (!file.Dirty)
+            {
+                return;
+            }
+
+            Fs.Write(devicePath, file.Buffer ?? []);
+            file.Dirty = false;
+        }
     }
 
     /// <summary>Fills in the stat structure ksmbd wants for one entry.</summary>

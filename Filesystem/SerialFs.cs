@@ -70,12 +70,17 @@ public class SerialFs(Serial serial)
     private readonly Lock cacheLock = new();
     private readonly Dictionary<string, (DateTime Fetched, List<SerialFsEntry> Entries, bool Truncated)> listings = new(StringComparer.OrdinalIgnoreCase);
 
+    // Bumped by every invalidation so a listing that was already in flight can tell that the
+    // card changed underneath it and decline to cache what it read.
+    private long cacheGeneration;
+
     /// <summary>Drops every cached listing. Called after anything that changes the card.</summary>
     public void InvalidateCache()
     {
         lock (cacheLock)
         {
             listings.Clear();
+            cacheGeneration++;
         }
     }
 
@@ -98,6 +103,7 @@ public class SerialFs(Serial serial)
         {
             listings.Remove(parent);
             listings.Remove(devicePath);
+            cacheGeneration++;
         }
     }
 
@@ -118,12 +124,16 @@ public class SerialFs(Serial serial)
 
     private (List<SerialFsEntry> Entries, bool Truncated) ListWithFlag(string devicePath)
     {
+        long generation;
+
         lock (cacheLock)
         {
             if (listings.TryGetValue(devicePath, out var cached) && DateTime.UtcNow - cached.Fetched < CacheLifetime)
             {
                 return (cached.Entries, cached.Truncated);
             }
+
+            generation = cacheGeneration;
         }
 
         List<string> lines = Send("ls", devicePath.Length == 0 ? "ls" : $"ls {devicePath}",
@@ -153,7 +163,13 @@ public class SerialFs(Serial serial)
 
         lock (cacheLock)
         {
-            listings[devicePath] = (DateTime.UtcNow, entries, truncated);
+            // Only publish if nothing invalidated while this listing was in flight. Without the
+            // check, an "ls" that started before a write and finished after it would reinstate
+            // the pre-write contents and hide the change for the rest of the cache lifetime.
+            if (cacheGeneration == generation)
+            {
+                listings[devicePath] = (DateTime.UtcNow, entries, truncated);
+            }
         }
 
         return (entries, truncated);

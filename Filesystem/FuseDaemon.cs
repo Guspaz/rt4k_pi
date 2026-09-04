@@ -64,7 +64,24 @@ namespace rt4k_pi.Filesystem
                     // carries over only the calling thread, that fork has no signal handler and
                     // no thread pool left to answer with, so it sits there until the stop
                     // timeout and gets SIGKILLed. That was the restart loop.
-                    // TODO: -s runs it single-threaded. Might need this for real serial file i/o, but investigate this in the future.
+                    // -s: the mount is single-threaded. Multi-threading was tried and reverted:
+                    // it bought nothing measurable, because the wire is one exclusive resource.
+                    // A get/put holds Serial's sessionLock for the whole payload, and every
+                    // metadata command (ls/stat/mv/df) takes that same lock, so extra FUSE
+                    // threads just queue up on one semaphore instead of one callback. Worse, the
+                    // per-command timeouts only start once the lock is acquired, so the real wait
+                    // is unbounded and the client times out first.
+                    //
+                    // This only becomes worth revisiting if the firmware gains partial reads and
+                    // writes. Transfers could then be chunked, releasing the lock between chunks,
+                    // which is what actually lets metadata be served during a copy (and would
+                    // give clients real progress instead of a 0%-then-99% jump).
+                    //
+                    // The thread-safety work done for the multi-threaded attempt is deliberately
+                    // kept: per-file state is guarded by OpenFile.Gate and the listing cache by
+                    // SerialFs's cacheLock. It is harmless under -s and is a prerequisite for
+                    // that future change, so don't reintroduce unguarded shared mutable state.
+                    //
                     // No -d: fuse's debug mode logs a timestamped line (plus a hex dump of the
                     // data) for every operation, which buries everything else in the debug log.
                     // Operations log themselves into the raw log, see SerialFsOperations.
