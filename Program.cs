@@ -19,7 +19,7 @@ using rt4k_pi.Filesystem;
 
 public partial class Program
 {
-    public static readonly string VERSION = "1.0";
+    public static readonly string VERSION = "2.0";
 
     public static Serial? Serial { get; private set; }
     public static RT4K? RT4K { get; private set; }

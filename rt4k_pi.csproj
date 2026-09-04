@@ -9,6 +9,7 @@
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
     <AllowUnsafeBlocks>False</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <!--

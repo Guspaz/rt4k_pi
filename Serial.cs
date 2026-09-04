@@ -116,9 +116,17 @@ public class Serial
                                 // crtscts is mandatory: streaming put relies on the device raising
                                 // CTS# when its 2048 byte RX ring hits HIWATER. Without it we blast
                                 // 2 Mbaud at a ring that cannot push back and silently overrun it.
-                                Util.RunCommand("stty", $"-F {currentPort} {baudRate} cs8 -cstopb -parenb crtscts");
+                                // raw + -echo are mandatory: the tty line discipline defaults to
+                                // cooked mode with local echo, which sends everything the device
+                                // says straight back to it as a command ("[COM] Bad Command:"),
+                                // and mangles CR/LF and 0x03/0x1A bytes in both directions.
+                                // min 1 / time 0 makes reads block until at least one byte is in.
+                                Util.RunCommand("stty", $"-F {currentPort} {baudRate} raw -echo -echoe -echok -echoctl -echoke -isig -ixon -ixoff cs8 -cstopb -parenb crtscts min 1 time 0");
                                 SetFtdiLatencyTimer(currentPort);
-                                port = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                                // Unbuffered: a tty is not a file, every Read/Write should map
+                                // straight onto one syscall instead of being staged through
+                                // FileStream's 4 KB buffer.
+                                port = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None, bufferSize: 0);
                             }
                             else
                             {
@@ -157,13 +165,29 @@ public class Serial
     // Dropping it to 1 ms removes that dead air.
     private static void SetFtdiLatencyTimer(string portName, int milliseconds = 1)
     {
+        string device = Path.GetFileName(portName);
+        string path = $"/sys/bus/usb-serial/devices/{device}/latency_timer";
+
         try
         {
-            string device = Path.GetFileName(portName);
-
-            foreach (string path in Directory.GetFiles($"/sys/bus/usb-serial/devices/{device}", "latency_timer"))
+            if (!File.Exists(path))
             {
-                File.WriteAllText(path, milliseconds.ToString());
+                Console.WriteLine($"Warning: {path} does not exist, so the FTDI latency timer is stuck at its default. Transfers will be slow.");
+                return;
+            }
+
+            File.WriteAllText(path, milliseconds.ToString());
+
+            // sysfs silently keeps the old value if the write didn't take (permissions, driver
+            // clamping), and a 16 ms timer costs ~16 ms on every round trip, so verify it.
+            string actual = File.ReadAllText(path).Trim();
+
+            if (actual != milliseconds.ToString())
+            {
+                Console.WriteLine($"Warning: FTDI latency timer on {device} is still {actual} ms (wanted {milliseconds} ms). Transfers will be slow.");
+            }
+            else
+            {
                 Console.WriteLine($"Set FTDI latency timer to {milliseconds} ms on {device}");
             }
         }
