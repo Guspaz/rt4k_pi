@@ -726,10 +726,17 @@ public class Serial
     /// Uploads a file to the RT4K's SD card. The device writes to a temp file and atomically
     /// renames it once the declared size and SHA-256 both check out.
     /// </summary>
-    public async Task PutFileAsync(string path, byte[] data, CancellationToken token = default)
+    public async Task PutFileAsync(string path, byte[] data, CancellationToken token = default, bool quiet = false)
     {
         string sha = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
         string command = $"put {data.Length} {sha} {path}";
+
+        // The device only says "put done" once it has taken the SD lock, received every frame
+        // and verified the hash, so the wait has to scale with the payload. A constant is fine
+        // for a profile but not for a multi-megabyte file: the wire time alone runs to tens of
+        // seconds, and the card write behind it is slower still, so a fixed timeout abandons a
+        // transfer that was in fact progressing normally.
+        int putTimeoutMs = PutBaseTimeoutMs + (int)(data.LongLength / PutBytesPerMs);
 
         await RunSessionAsync(command, "put", "put done", async ready =>
         {
@@ -751,8 +758,18 @@ public class Serial
             WriteFrame(nonce, Rtl1Type.Data, seq);
 
             return await Task.FromResult(true);
-        }, token, terminalTimeoutMs: 15000);
+        }, token, terminalTimeoutMs: putTimeoutMs, quiet: quiet);
     }
+
+    /// <summary>Fixed cost of a put: handshake, SD lock, hash verify and the rename into place.</summary>
+    private const int PutBaseTimeoutMs = 15000;
+
+    /// <summary>
+    /// Assumed sustained throughput, in bytes per millisecond, for sizing a put's timeout.
+    /// Deliberately pessimistic against the 2 Mbaud line rate: the card write and the device's
+    /// own service loop are the real limit, not the wire.
+    /// </summary>
+    private const double PutBytesPerMs = 20.0;
 
     private async Task<T> RunSessionAsync<T>(string command, string verb, string terminalLine, Func<string, Task<T>> body, CancellationToken token, int terminalTimeoutMs = XferIdleMs, bool quiet = false)
     {

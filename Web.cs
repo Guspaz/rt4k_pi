@@ -76,6 +76,17 @@ public partial class Program
         app.MapGet("/GetUpdateStatus", () => Installer.GetStatus());
         app.MapGet("/CheckUpdates", () => Installer.CheckUpdate());
 
+        // The raw log is deliberately a file download rather than a page: it can be tens of
+        // thousands of lines, which is exactly the volume that makes the debug log page unusable,
+        // and a file is what you'd want to attach somewhere anyway. It always includes the
+        // previous run's log, which after a crash is the one that matters.
+        app.MapGet("/RawLog", () => Results.File(
+            System.Text.Encoding.UTF8.GetBytes(RawLog.Dump()),
+            "text/plain",
+            $"rt4k_pi-{DateTime.Now:yyyyMMdd-HHmmss}.log"));
+
+        app.MapPost("/SetRawLog", ([FromQuery] bool enabled) => RawLog.SetEnabled(enabled));
+
         // Commands
         app.MapGet("/SendSerial", ([FromQuery] string cmd) => Serial?.WriteLine(cmd));
 

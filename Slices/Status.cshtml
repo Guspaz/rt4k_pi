@@ -139,7 +139,7 @@
                             <span>&#x231B; @(Model.FuseDaemon.Status.ToString())</span>
                             break;
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Running:
-                            <span>&#x2705; Running -  \\@(Model.StatusDaemon.Hostname).local\sd or \\@localIP\sd</span>
+                            <span>&#x2705; Running -  \\@(Model.StatusDaemon.Hostname).local\sd or \\@localIP\sd (username and password: @rt4k_pi.Installer.KsmbdUser)</span>
                             break;
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Stopped:
                         case rt4k_pi.Filesystem.FuseDaemon.FuseStatus.Error:

@@ -55,6 +55,16 @@ public partial class SettingsDaemon
         set => SetProperty(ref _VerboseLogging, value);
     }
 
+    // When the scaler is in standby its SD card is unreachable, so the SMB share would be there
+    // but empty. With this on, an access to the share wakes the unit first. Off means standby is
+    // left strictly alone and the share stays unavailable until the user powers it on themselves.
+    private bool _WakeOnFileAccess = true;
+    public bool WakeOnFileAccess
+    {
+        get => _WakeOnFileAccess;
+        set => SetProperty(ref _WakeOnFileAccess, value);
+    }
+
     private bool _EnableSer2net = true;
     public bool EnableSer2net
     {

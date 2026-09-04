@@ -96,6 +96,7 @@
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         <tr><th style="width: 25%;">Verbose logging</th><td><input class="w3-check" id="VerboseLogging" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.VerboseLogging ? "checked" : "") /> <label for="VerboseLogging">Enable</label></td></tr>
+        <tr><th style="width: 25%;">Wake on file access</th><td><input class="w3-check" id="WakeOnFileAccess" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.WakeOnFileAccess ? "checked" : "") /> <label for="WakeOnFileAccess">Power on the @Model.Settings.ModelName when its SD card is accessed over SMB</label></td></tr>
     </table>
 </div>
 
@@ -120,10 +121,35 @@
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         <tr><th style="width: 25%;">Serial benchmark</th><td><button class="@LayoutModel.ButtonClasses" onclick="runBenchmark(); return false;" type="button" id="benchmarkButton">Run 1 MB round-trip</button></td></tr>
         <tr><th>Result:</th><td id="benchmarkResult">Idle</td></tr>
+        <tr>
+            <th>Raw log</th>
+            <td>
+                <p class="w3-small w3-text-grey">
+                    Unfiltered and timestamped, written to disk as it happens and kept out of the
+                    debug log above, which can't take this volume. Off by default, because a line
+                    per file operation is needless wear on the SD card. Stays on across restarts,
+                    so it will capture a crash and restart from the first line.
+                </p>
+                <p>
+                    <input class="w3-check" type="checkbox" id="rawLogEnabled" @(RawLog.Enabled ? "checked" : "") onclick="setRawLog(this); return true;">
+                    <label for="rawLogEnabled">Record raw log</label>
+                </p>
+                <button class="@LayoutModel.ButtonClasses" onclick="window.location='/RawLog'; return false;" type="button">Download</button>
+            </td>
+        </tr>
     </table>
 </div>
 
 <script>
+    async function setRawLog(checkbox) {
+        try {
+            await fetch(`/SetRawLog?enabled=${checkbox.checked}`, { method: "POST" });
+        } catch (error) {
+            console.error("Error updating raw log", error);
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+
     async function runBenchmark() {
         const button = document.getElementById("benchmarkButton");
         const result = document.getElementById("benchmarkResult");

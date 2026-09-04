@@ -76,6 +76,11 @@ public class Logger : TextWriter
         ConsoleColor entryColor = threadColor ?? oldColor;
         bool isVerboseLog = entryText.StartsWith("info: ");
 
+        // Everything the app prints is mirrored into the raw log, including the ASP.NET noise
+        // that gets dropped below. That log is on disk and survives a restart, so during a crash
+        // loop it's the only record of what the run was doing when it died.
+        RawLog.WriteFragment(entryText);
+
         // Anything we're about to drop must not affect line tracking, or a suppressed entry
         // would leave us believing the console is mid-line when it isn't.
         if (!isVerboseLog || Program.Settings.VerboseLogging)
