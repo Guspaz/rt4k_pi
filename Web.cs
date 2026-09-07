@@ -65,16 +65,30 @@ public partial class Program
         // Static file overrides
         app.MapGet("/favicon.ico", () => Results.File(embeddedProvider.GetFileInfo("Static/favicon.ico").CreateReadStream(), "image/x-icon"));
 
-        // Pages
+        MapPages(app, appState);
+        MapAdministration(app);
+        MapDeviceCommands(app);
+        MapDeviceStreams(app, appState);
+
+        Console.WriteLine("rt4k_pi startup complete.");
+        app.Run();
+    }
+
+    private static void MapPages(WebApplication app, AppState appState)
+    {
         app.MapGet("/", () => Results.RazorSlice<Slices.Status, Slices.AppState>(appState));
         app.MapGet("/RemoteOSD", () => Results.RazorSlice<Slices.RemoteOSD, Slices.AppState>(appState));
         app.MapGet("/Calculator", () => Results.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
         app.MapGet("/Settings", () => Results.RazorSlice<Slices.Settings, Slices.AppState>(appState));
         app.MapGet("/DebugLog", () => Results.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
+    }
 
-        // APIs
+    private static void MapAdministration(WebApplication app)
+    {
         app.MapGet("/GetUpdateStatus", () => Installer.GetStatus());
-        app.MapGet("/CheckUpdates", () => Installer.CheckUpdate());
+        app.MapGet("/CheckUpdates", () => Installer.CheckUpdateAsync());
+        app.MapPost("/InstallUpdate", () => Installer.DoUpdate());
+        app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value));
 
         // The raw log is deliberately a file download rather than a page: it can be tens of
         // thousands of lines, which is exactly the volume that makes the debug log page unusable,
@@ -86,10 +100,44 @@ public partial class Program
             $"rt4k_pi-{DateTime.Now:yyyyMMdd-HHmmss}.log"));
 
         app.MapPost("/SetRawLog", ([FromQuery] bool enabled) => RawLog.SetEnabled(enabled));
+    }
 
-        // Commands
-        app.MapGet("/SendSerial", ([FromQuery] string cmd) => Serial?.WriteLine(cmd));
+    private static void MapDeviceCommands(WebApplication app)
+    {
+        app.MapGet("/SendSerial", async ([FromQuery] string cmd, CancellationToken token) =>
+        {
+            if (Serial == null || !Serial.IsConnected)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
 
+            try
+            {
+                await Serial.SendTextCommandAsync(cmd, token);
+                return Results.Ok();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (Exception ex) when (ex is SerialException or IOException)
+            {
+                return Results.Problem(ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        });
+
+        app.MapPost("/RemoteCommand/{cmd}", async ([FromRoute] string cmd) =>
+        {
+            if (RT4K is not null)
+            {
+                await RT4K.SendRemoteStringAsync(cmd);
+            }
+        });
+        app.MapPost("/RunBenchmark", async () => RT4K is null ? $"{rt4k_pi.RT4K.DisplayName} not available" : await RT4K.BenchmarkAsync());
+    }
+
+    private static void MapDeviceStreams(WebApplication app, AppState appState)
+    {
         // Kept for the page's first paint and as a no-JS fallback; live updates arrive on
         // /OsdStream instead of by polling this.
         app.MapGet("/OsdImage", (HttpContext context) =>
@@ -245,20 +293,5 @@ public partial class Program
             }
         });
 
-        app.MapPost("/RemoteCommand/{cmd}", async ([FromRoute] string cmd) =>
-        {
-            if (RT4K is not null)
-            {
-                await RT4K.SendRemoteStringAsync(cmd);
-            }
-        });
-
-        app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value) );
-        app.MapPost("/InstallUpdate", () => Installer.DoUpdate());
-        app.MapPost("/RunBenchmark", async () => RT4K is null ? $"{rt4k_pi.RT4K.DisplayName} not available" : await RT4K.BenchmarkAsync());
-
-        Console.WriteLine("rt4k_pi startup complete.");
-
-        app.Run();
     }
 }

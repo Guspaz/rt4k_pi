@@ -17,6 +17,14 @@ internal class SerialFsOperations : IFuseOperations
     // Writes are buffered whole, and the Pi Zero 2 W only has 512 MB. Well clear of the largest
     // thing anyone should be writing here (a ~32 MB firmware image), but not unbounded.
     private const long MaxFileSize = 64 * 1024 * 1024;
+    private const long MaxBufferedBytes = 128 * 1024 * 1024;
+    private static readonly Lock memoryLock = new();
+    private static long bufferedBytes;
+
+    private sealed class StagingException(PosixResult result, string message) : Exception(message)
+    {
+        public PosixResult Result { get; } = result;
+    }
 
     /// <summary>Where the card gets mounted, and what ksmbd shares out.</summary>
     private static readonly string MountPoint = Path.Combine(Directory.GetCurrentDirectory(), "serialfs");
@@ -60,6 +68,8 @@ internal class SerialFsOperations : IFuseOperations
         public int Length { get; set; }
 
         public bool Dirty { get; set; }
+        public bool Unlinked { get; set; }
+        public long ReservedBytes { get; set; }
 
         /// <summary>
         /// The file's contents pulled down whole for reading, so a sequential read isn't one
@@ -305,25 +315,26 @@ internal class SerialFsOperations : IFuseOperations
     }
 
     /// <summary>
-    /// Uploads any staged writes.
-    ///
-    /// The protocol has no partial write: every flush sends the whole file. SMB flushes more
-    /// than once during a copy, so honouring each one re-uploads everything written so far and
-    /// makes the transfer quadratic. Release always flushes, so deferring here costs nothing in
-    /// durability that the copy itself doesn't already assume.
+    /// Uploads pending writes while the caller can still receive an error; FUSE ignores
+    /// errors returned by Release. Each dirty flush must upload the whole file.
     /// </summary>
     public PosixResult Flush(ReadOnlyNativeMemory<byte> fileNamePtr, ref FuseFileInfo fileInfo)
     {
         var path = FuseHelper.GetString(fileNamePtr);
         Log($"FUSE: Flush({path})");
 
-        return PosixResult.Success;
+        try
+        {
+            FlushFile(fileInfo.Context as OpenFile ?? FindFile(SerialFs.DevicePath(path)));
+            return PosixResult.Success;
+        }
+        catch (Exception ex)
+        {
+            return Fail("Flush", path, ex);
+        }
     }
 
-    /// <remarks>
-    /// Unlike <see cref="Flush"/> this is an explicit fsync, so the caller is asking for the
-    /// data to be on the card before it returns and it's worth the whole-file upload.
-    /// </remarks>
+    /// <summary>Commits pending contents to the card before reporting success.</summary>
     public PosixResult FSync(ReadOnlyNativeMemory<byte> fileNamePtr, bool datasync, ref FuseFileInfo fileInfo)
     {
         var path = FuseHelper.GetString(fileNamePtr);
@@ -331,7 +342,7 @@ internal class SerialFsOperations : IFuseOperations
 
         try
         {
-            FlushFile(SerialFs.DevicePath(path));
+            FlushFile(fileInfo.Context as OpenFile ?? FindFile(SerialFs.DevicePath(path)));
             return PosixResult.Success;
         }
         catch (Exception ex)
@@ -382,9 +393,13 @@ internal class SerialFsOperations : IFuseOperations
             // Nothing observes the gap: GetAttr, Open and Read all consult the staged buffer
             // before the card, so a stat between create and the first write is still answered.
             OpenFile file = Acquire(device);
-            file.Buffer = [];
-            file.Length = 0;
-            file.Dirty = true;
+            lock (file.Gate)
+            {
+                ClearBuffers(file);
+                file.Buffer = [];
+                file.Length = 0;
+                file.Dirty = true;
+            }
             fileInfo.Context = file;
 
             return PosixResult.Success;
@@ -484,9 +499,13 @@ internal class SerialFsOperations : IFuseOperations
             // O_TRUNC means the old contents are irrelevant, so skip downloading them
             if (fileInfo.flags.HasFlag(PosixOpenFlags.Truncate))
             {
-                file.Buffer = [];
-                file.Length = 0;
-                file.Dirty = true;
+                lock (file.Gate)
+                {
+                    ClearBuffers(file);
+                    file.Buffer = [];
+                    file.Length = 0;
+                    file.Dirty = true;
+                }
             }
 
             fileInfo.Context = file;
@@ -525,22 +544,28 @@ internal class SerialFsOperations : IFuseOperations
 
         try
         {
+            if (position < 0) { return PosixResult.EINVAL; }
+            if (buffer.Length == 0) { return PosixResult.Success; }
             string device = SerialFs.DevicePath(path);
 
             // Anything staged in RAM is newer than what's on the card, so it wins
-            if (StagedFile(device) is OpenFile stagedFile)
+            OpenFile? stagedFile = fileInfo.Context as OpenFile ?? StagedFile(device);
+            if (stagedFile != null)
             {
                 lock (stagedFile.Gate)
                 {
-                    if (stagedFile.Buffer is byte[] staged && position < stagedFile.Length)
+                    device = stagedFile.DevicePath;
+                    if (stagedFile.Buffer is byte[] staged)
                     {
-                        int available = (int)Math.Min(stagedFile.Length - position, buffer.Length);
-                        staged.AsSpan((int)position, available).CopyTo(buffer.Span);
-                        readLength = available;
+                        if (position < stagedFile.Length)
+                        {
+                            int available = (int)Math.Min(stagedFile.Length - position, buffer.Length);
+                            staged.AsSpan((int)position, available).CopyTo(buffer.Span);
+                            readLength = available;
+                        }
+                        return PosixResult.Success;
                     }
                 }
-
-                return PosixResult.Success;
             }
 
             SerialFsEntry? entry = Fs.Stat(device);
@@ -564,10 +589,11 @@ internal class SerialFsOperations : IFuseOperations
             // that back into a single transfer. A sequential whole-file read is what a copy does,
             // so this is the case worth optimising for; Release drops the buffer again.
             OpenFile handle = fileInfo.Context as OpenFile ?? Acquire(device);
+            fileInfo.Context = handle;
 
             lock (handle.Gate)
             {
-                if (handle.ReadCache == null && entry.Size <= MaxFileSize)
+                if (handle.ReadCache == null && entry.Size <= MaxFileSize && TryReserve(handle, entry.Size))
                 {
                     handle.ReadCache = entry.Size == 0 ? [] : Fs.Read(device, 0, entry.Size);
                 }
@@ -636,18 +662,9 @@ internal class SerialFsOperations : IFuseOperations
 
         try
         {
-            string device = SerialFs.DevicePath(path);
+            OpenFile? file = fileInfo.Context as OpenFile ?? FindFile(SerialFs.DevicePath(path));
             fileInfo.Context = null;
-
-            FlushFile(device);
-
-            lock (openLock)
-            {
-                if (openFiles.TryGetValue(device, out OpenFile? file) && --file.Handles <= 0)
-                {
-                    openFiles.Remove(device);
-                }
-            }
+            if (file != null) { ReleaseReference(file); }
 
             return PosixResult.Success;
         }
@@ -668,18 +685,25 @@ internal class SerialFsOperations : IFuseOperations
             string fromDevice = SerialFs.DevicePath(fromPath);
             string toDevice = SerialFs.DevicePath(toPath);
 
-            // Staged writes are keyed by path, so flush them before the name moves out from
-            // under them (a rename of an open file is exactly what an SMB save does)
-            FlushFile(fromDevice);
-
-            Fs.Rename(fromDevice, toDevice);
-
             lock (openLock)
             {
-                if (openFiles.Remove(fromDevice, out OpenFile? file))
+                if (!fromDevice.Equals(toDevice, StringComparison.OrdinalIgnoreCase) && openFiles.ContainsKey(toDevice))
                 {
-                    file.DevicePath = toDevice;
-                    openFiles[toDevice] = file;
+                    return PosixResult.EBUSY;
+                }
+
+                var affected = openFiles.Where(pair => pair.Key.Equals(fromDevice, StringComparison.OrdinalIgnoreCase) ||
+                    pair.Key.StartsWith(fromDevice + "/", StringComparison.OrdinalIgnoreCase)).ToArray();
+                foreach (var pair in affected) { FlushFile(pair.Value); }
+                Fs.Rename(fromDevice, toDevice);
+                foreach (var pair in affected)
+                {
+                    lock (pair.Value.Gate)
+                    {
+                        openFiles.Remove(pair.Key);
+                        pair.Value.DevicePath = toDevice + pair.Key[fromDevice.Length..];
+                        openFiles[pair.Value.DevicePath] = pair.Value;
+                    }
                 }
             }
 
@@ -715,42 +739,43 @@ internal class SerialFsOperations : IFuseOperations
 
         try
         {
+            if (size < 0) { return PosixResult.EINVAL; }
             if (size > MaxFileSize)
             {
                 return PosixResult.EFBIG;
             }
 
             string device = SerialFs.DevicePath(path);
-            OpenFile? file;
-
-            lock (openLock)
+            if (Fs.Stat(device) == null && !HasStaged(device)) { return PosixResult.ENOENT; }
+            OpenFile file = Acquire(device);
+            try
             {
-                openFiles.TryGetValue(device, out file);
+                lock (file.Gate)
+                {
+                    if (size == 0)
+                    {
+                        ClearBuffers(file);
+                        file.Buffer = [];
+                        file.Length = 0;
+                    }
+                    else
+                    {
+                        LoadBuffer(file);
+                        EnsureCapacity(file, (int)size);
+                    }
+
+                    if (size > file.Length)
+                    {
+                        file.Buffer!.AsSpan(file.Length, (int)size - file.Length).Clear();
+                    }
+
+                    file.Length = (int)size;
+                    file.Dirty = true;
+                }
             }
-
-            // Truncating a file nobody has open still has to go out to the card, so stage it
-            // temporarily and upload it on the spot.
-            file ??= new OpenFile(device);
-
-            lock (file.Gate)
+            finally
             {
-                LoadBuffer(file);
-                EnsureCapacity(file, (int)size);
-
-                // Extending by truncate also has to read back as zeroes
-                if (size > file.Length)
-                {
-                    file.Buffer!.AsSpan(file.Length, (int)size - file.Length).Clear();
-                }
-
-                file.Length = (int)size;
-                file.Dirty = true;
-
-                if (file.Handles == 0)
-                {
-                    Fs.Write(device, StagedContents(file));
-                    file.Dirty = false;
-                }
+                ReleaseReference(file);
             }
 
             return PosixResult.Success;
@@ -772,14 +797,24 @@ internal class SerialFsOperations : IFuseOperations
 
             lock (openLock)
             {
-                // Whatever was staged is gone with the file, so don't upload it afterwards
                 if (openFiles.TryGetValue(device, out OpenFile? file))
                 {
-                    file.Dirty = false;
+                    lock (file.Gate)
+                    {
+                        // Existing handles keep their contents, but must never recreate the path.
+                        LoadBuffer(file);
+                        if (Fs.Stat(device) != null) { Fs.Remove(device); }
+                        file.Unlinked = true;
+                        file.Dirty = false;
+                        openFiles.Remove(device);
+                        if (file.Handles == 0) { ClearBuffers(file); }
+                    }
+                }
+                else
+                {
+                    Fs.Remove(device);
                 }
             }
-
-            Fs.Remove(device);
 
             return PosixResult.Success;
         }
@@ -798,15 +833,17 @@ internal class SerialFsOperations : IFuseOperations
 
         try
         {
-            long end = position + buffer.Length;
-
-            if (end > MaxFileSize)
+            if (position < 0) { return PosixResult.EINVAL; }
+            if (buffer.Length == 0) { return PosixResult.Success; }
+            if (position > MaxFileSize || buffer.Length > MaxFileSize - position)
             {
                 return PosixResult.EFBIG;
             }
+            long end = position + buffer.Length;
 
             string device = SerialFs.DevicePath(path);
             OpenFile file = fileInfo.Context as OpenFile ?? Acquire(device);
+            fileInfo.Context = file;
 
             lock (file.Gate)
             {
@@ -852,7 +889,7 @@ internal class SerialFsOperations : IFuseOperations
                 openFiles[devicePath] = file;
             }
 
-            file.Handles++;
+            lock (file.Gate) { file.Handles++; }
 
             return file;
         }
@@ -869,7 +906,8 @@ internal class SerialFsOperations : IFuseOperations
     {
         lock (openLock)
         {
-            return openFiles.TryGetValue(devicePath, out OpenFile? file) && file.Buffer != null ? file : null;
+            if (!openFiles.TryGetValue(devicePath, out OpenFile? file)) { return null; }
+            lock (file.Gate) { return file.Buffer != null ? file : null; }
         }
     }
 
@@ -889,8 +927,26 @@ internal class SerialFsOperations : IFuseOperations
         }
 
         SerialFsEntry? entry = Fs.Stat(file.DevicePath);
+        if (entry?.IsDirectory == true)
+        {
+            throw new StagingException(PosixResult.EISDIR, "Cannot stage a directory.");
+        }
+        if (entry?.Size > MaxFileSize)
+        {
+            throw new StagingException(PosixResult.EFBIG, "Existing file exceeds the 64 MiB staging limit.");
+        }
 
-        file.Buffer = entry == null || entry.Size == 0 ? [] : Fs.Read(file.DevicePath, 0, entry.Size);
+        if (file.ReadCache != null)
+        {
+            file.Buffer = file.ReadCache;
+            file.ReadCache = null;
+        }
+        else
+        {
+            Reserve(file, entry?.Size ?? 0);
+            file.Buffer = entry == null || entry.Size == 0 ? [] : Fs.Read(file.DevicePath, 0, entry.Size);
+        }
+
         file.Length = file.Buffer.Length;
 
         return file.Buffer;
@@ -916,25 +972,27 @@ internal class SerialFsOperations : IFuseOperations
 
         while (capacity < required)
         {
-            capacity *= 2;
+            capacity = (int)Math.Min(MaxFileSize, capacity * 2L);
         }
 
         // Only the live part is worth copying; the rest of the old buffer is uninitialised slack
+        Reserve(file, capacity);
         var grown = new byte[capacity];
         staged.AsSpan(0, file.Length).CopyTo(grown);
         file.Buffer = grown;
     }
 
     /// <summary>Uploads a staged file if it has unwritten changes.</summary>
-    private void FlushFile(string devicePath)
+    private OpenFile? FindFile(string devicePath)
     {
-        OpenFile? file;
-
         lock (openLock)
         {
-            openFiles.TryGetValue(devicePath, out file);
+            return openFiles.GetValueOrDefault(devicePath);
         }
+    }
 
+    private void FlushFile(OpenFile? file)
+    {
         if (file == null)
         {
             return;
@@ -944,14 +1002,59 @@ internal class SerialFsOperations : IFuseOperations
         // threads closing the same file can't both decide it's dirty and upload it twice.
         lock (file.Gate)
         {
-            if (!file.Dirty)
+            if (!file.Dirty || file.Unlinked)
             {
                 return;
             }
 
-            Fs.Write(devicePath, StagedContents(file));
+            Fs.Write(file.DevicePath, StagedContents(file));
             file.Dirty = false;
         }
+    }
+
+    private void ReleaseReference(OpenFile file)
+    {
+        lock (openLock)
+        {
+            lock (file.Gate)
+            {
+                if (--file.Handles > 0) { return; }
+                // A failed upload keeps its dirty entry for a later reopen/flush to retry.
+                FlushFile(file);
+                if (ReferenceEquals(openFiles.GetValueOrDefault(file.DevicePath), file))
+                {
+                    openFiles.Remove(file.DevicePath);
+                }
+                ClearBuffers(file);
+            }
+        }
+    }
+
+    private static bool TryReserve(OpenFile file, long bytes)
+    {
+        lock (memoryLock)
+        {
+            long next = bufferedBytes - file.ReservedBytes + bytes;
+            if (next > MaxBufferedBytes) { return false; }
+            bufferedBytes = next;
+            file.ReservedBytes = bytes;
+            return true;
+        }
+    }
+
+    private static void Reserve(OpenFile file, long bytes)
+    {
+        if (!TryReserve(file, bytes))
+        {
+            throw new StagingException(PosixResult.ENOMEM, "The 128 MiB filesystem buffer budget is exhausted.");
+        }
+    }
+
+    private static void ClearBuffers(OpenFile file)
+    {
+        file.Buffer = null;
+        file.ReadCache = null;
+        Reserve(file, 0);
     }
 
     /// <summary>
@@ -1020,7 +1123,12 @@ internal class SerialFsOperations : IFuseOperations
     /// <summary>Turns an exception from the serial layer into the errno FUSE expects.</summary>
     private static PosixResult Fail(string operation, string path, Exception ex)
     {
-        PosixResult result = ex is SerialFsException fsError ? fsError.Result : PosixResult.EIO;
+        PosixResult result = ex switch
+        {
+            SerialFsException fsError => fsError.Result,
+            StagingException staging => staging.Result,
+            _ => PosixResult.EIO
+        };
 
         // Failures are rare and always worth seeing, unlike the operations themselves
         Console.WriteLine($"FUSE: {operation}({path}) = {result} ({ex.Message})");

@@ -12,9 +12,17 @@ public class Installer
 
     private const string path = "/etc/systemd/system/rt4k.service";
 
-    public bool Updating { get; private set; } = false;
-    public int UpdateProgress { get; private set; } = 0;
-    public string UpdateError { get; private set; } = "";
+    private int updating;
+    private volatile int updateProgress;
+    private volatile string updateError = "";
+    private Task? updateTask;
+    private static readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(5) };
+    private const long MaxUpdateSize = 256 * 1024 * 1024;
+    private const string VersionUrl = "https://guspaz.github.io/rt4k.version";
+
+    public bool Updating => Volatile.Read(ref updating) != 0;
+    public int UpdateProgress => updateProgress;
+    public string UpdateError => updateError;
 
     // Package operations pull from the network and unpack onto an SD card, so the default
     // command timeout is nowhere near enough for them
@@ -35,7 +43,7 @@ public class Installer
         // 90 second wait before systemd resorts to SIGKILL. That stall is what a restart ends up
         // sitting on, so cut it short: there is no shutdown work worth waiting that long for.
         sb.AppendLine("TimeoutStopSec=10");
-        sb.AppendLine($"ExecStart={Directory.GetCurrentDirectory()}/rt4k_pi");
+        sb.AppendLine($"ExecStart={Path.Combine(AppContext.BaseDirectory, "rt4k_pi")}");
         sb.AppendLine("");
         sb.AppendLine("[Install]");
         sb.AppendLine("WantedBy=multi-user.target");
@@ -123,10 +131,14 @@ public class Installer
     }
 
     public static string CheckUpdate()
+        => CheckUpdateAsync().GetAwaiter().GetResult();
+
+    public static async Task<string> CheckUpdateAsync()
     {
         try
         {
-            return Program.Settings.LatestVersion = new HttpClient().GetStringAsync("https://guspaz.github.io/rt4k.version").Result.Split('@')[0].Trim();
+            var info = await ReadUpdateInfoAsync(CancellationToken.None);
+            return Program.Settings.LatestVersion = info.Version;
         }
         catch (Exception ex)
         {
@@ -137,99 +149,136 @@ public class Installer
 
     public void DoUpdate()
     {
+        if (Interlocked.CompareExchange(ref updating, 1, 0) != 0)
+        {
+            return;
+        }
+
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
             SetUpdateError("Unable to update on Windows");
-            return;
-        }
-        else if (Updating)
-        {
+            Volatile.Write(ref updating, 0);
             return;
         }
 
-        // For some reason, this isn't set?
-        Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
-
-        Updating = true;
-
+        updateProgress = 0;
+        updateError = "";
         Console.WriteLine("Update triggered");
+        updateTask = Task.Run(InstallUpdateAsync);
+    }
 
-        Task.Run(async () =>
+    private static async Task<(string Version, Uri Url, byte[] Hash)> ReadUpdateInfoAsync(CancellationToken token)
+    {
+        string[] fields = (await http.GetStringAsync(VersionUrl, token)).Split('@', StringSplitOptions.TrimEntries);
+        if (fields.Length != 3 || !Version.TryParse(fields[0], out _) ||
+            !Uri.TryCreate(fields[1], UriKind.Absolute, out Uri? url) ||
+            (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
         {
-            try
+            throw new InvalidDataException("Invalid update metadata.");
+        }
+
+        byte[] hash = Convert.FromHexString(fields[2]);
+        if (hash.Length != 32) { throw new InvalidDataException("Invalid update SHA-256."); }
+        return (fields[0], url, hash);
+    }
+
+    private async Task DownloadUpdateAsync(string archive, Uri url, byte[] expectedHash, CancellationToken token)
+    {
+        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token);
+        response.EnsureSuccessStatusCode();
+        long? length = response.Content.Headers.ContentLength;
+        if (length is <= 0 or > MaxUpdateSize) { throw new InvalidDataException("Invalid update size."); }
+
+        using var input = await response.Content.ReadAsStreamAsync(token);
+        using var output = new FileStream(archive, FileMode.CreateNew, FileAccess.Write, FileShare.None, 8192, true);
+        using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = await input.ReadAsync(buffer, token)) > 0)
+        {
+            total += read;
+            if (total > MaxUpdateSize) { throw new InvalidDataException("Update exceeds 256 MiB."); }
+            await output.WriteAsync(buffer.AsMemory(0, read), token);
+            sha256.AppendData(buffer, 0, read);
+            if (length.HasValue) { updateProgress = (int)Math.Min(90, total * 90 / length.Value); }
+        }
+
+        if (total == 0 || (length.HasValue && total != length.Value) ||
+            !CryptographicOperations.FixedTimeEquals(sha256.GetHashAndReset(), expectedHash))
+        {
+            throw new InvalidDataException("Update size or SHA-256 mismatch.");
+        }
+
+        await output.FlushAsync(token);
+        output.Flush(flushToDisk: true);
+    }
+
+    private async Task InstallUpdateAsync()
+    {
+        string directory = Path.Combine(AppContext.BaseDirectory, ".update-" + Guid.NewGuid().ToString("N"));
+        string executable = Path.Combine(AppContext.BaseDirectory, "rt4k_pi");
+        string backup = executable + ".previous";
+        bool replaced = false;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var info = await ReadUpdateInfoAsync(timeout.Token);
+            string archive = Path.Combine(directory, "update.7z");
+            await DownloadUpdateAsync(archive, info.Url, info.Hash, timeout.Token);
+
+            string extracted = Path.Combine(directory, "files");
+            Directory.CreateDirectory(extracted);
+            Util.RunCommand("7zr", $"x -y -o\"{extracted}\" \"{archive}\"");
+            string staged = Path.Combine(extracted, "rt4k_pi");
+            var file = new FileInfo(staged);
+            if (!file.Exists || file.LinkTarget != null || file.Length < 64 || file.Length > MaxUpdateSize)
             {
-                var updateInfo = (await new HttpClient().GetStringAsync("https://guspaz.github.io/rt4k.version")).Split('@');
-                var downloadUrl = updateInfo[1].Trim();
-                var downloadHash = updateInfo[2].Trim();
-
-                Console.WriteLine($"Downloading update from {downloadUrl}");
-
-                var download = await new HttpClient().GetAsync(downloadUrl);
-
-                long length = download.Content.Headers.ContentLength ?? 0;
-
-                if (length == 0)
-                {
-                    SetUpdateError("Invalid update size");
-                    return;
-                }
-
-                Console.WriteLine($"Download size: {length} bytes");
-
-                using var downloadStream = await download.Content.ReadAsStreamAsync();
-                using var fileStream = new FileStream("updateFile.7z", FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
-                using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    
-                var buffer = new byte[8192];
-                int bytesRead;
-                long totalBytesRead = 0;
-
-                while ((bytesRead = await downloadStream.ReadAsync(buffer)) > 0)
-                {
-                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
-                    sha256.AppendData(buffer, 0, bytesRead);
-                    totalBytesRead += bytesRead;
-
-                    UpdateProgress = (int)((double)totalBytesRead / length * 100);
-                }
-
-                var hash = Convert.ToHexStringLower(sha256.GetHashAndReset());
-                if (hash != downloadHash)
-                {
-                    SetUpdateError("Update hash mismatch");
-                    return;
-                }
-
-                await fileStream.FlushAsync();
-                        
-                Console.WriteLine("Download succesful, update hash matches");
-
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-                {
-                    Console.WriteLine("Extracting update");
-                    Util.RunCommand("7zr", "x -y updateFile.7z");
-                    Util.RunCommand("chmod", "+x rt4k_pi");
-                    Console.WriteLine("Restarting service with new executable");
-                    DoInstall();
-                }
-
-                UpdateProgress = 100;
-                UpdateError = "";
-                Updating = false;
-                    
+                throw new InvalidDataException("Archive must contain a regular rt4k_pi executable.");
             }
-            catch (Exception ex)
+
+            using (var stream = new FileStream(staged, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
-                SetUpdateError($"Update error: {ex.Message}");
+                byte[] header = new byte[20];
+                stream.ReadExactly(header);
+                if (!header.AsSpan(0, 6).SequenceEqual(new byte[] { 0x7f, (byte)'E', (byte)'L', (byte)'F', 2, 1 }) ||
+                    header[18] != 183 || header[19] != 0)
+                {
+                    throw new InvalidDataException("Update is not a Linux ARM64 executable.");
+                }
+                stream.Flush(flushToDisk: true);
             }
-        });
+            File.SetUnixFileMode(staged, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            File.Copy(executable, backup, overwrite: true);
+            File.Move(staged, executable, overwrite: true);
+            replaced = true;
+            Directory.Delete(directory, recursive: true);
+            updateProgress = 100;
+            DoInstall();
+        }
+        catch (Exception ex)
+        {
+            if (replaced)
+            {
+                try { File.Move(backup, executable, overwrite: true); }
+                catch (Exception rollback) { Console.WriteLine($"Update rollback failed: {rollback.Message}"); }
+            }
+            SetUpdateError($"Update error: {ex.Message}");
+        }
+        finally
+        {
+            try { if (Directory.Exists(directory)) { Directory.Delete(directory, recursive: true); } }
+            catch (Exception ex) { Console.WriteLine($"Update cleanup failed: {ex.Message}"); }
+            Volatile.Write(ref updating, 0);
+        }
     }
 
     private void SetUpdateError(string error)
     {
-        UpdateError = error;
-        UpdateProgress = 0;
-        Updating = false;
+        updateError = error;
+        updateProgress = 0;
     }
 
     public bool IsKsmbdInstalled()

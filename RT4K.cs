@@ -197,6 +197,8 @@ public class RT4K
 
     private readonly Serial serial;
     private readonly CancellationTokenSource cts = new();
+    private readonly Lock lifecycle = new();
+    private Task? workers;
 
     // How long the RT4K gets to answer a "status" poll before we call it asleep. The device
     // services one command per superloop pass, so this is generous.
@@ -213,26 +215,40 @@ public class RT4K
     {
         this.serial = serial;
         Osd = new OsdMirror(serial, this);
-
-        // While the RT4K is in standby its dispatcher doesn't run: every command except
-        // "pwr on" is silently discarded. That makes a "status" poll a reliable power probe.
-        Task.Run(async () =>
-        {
-            while (!cts.Token.IsCancellationRequested)
-            {
-                await RefreshPowerAsync();
-                await Task.Delay(Power == PowerState.On ? PollIntervalOnMs : PollIntervalOffMs, cts.Token);
-            }
-        }, cts.Token);
-
-        // Captures on demand: idles until a page is watching, then follows the device's own
-        // remote echo so the mirror updates as soon as a keypress lands.
-        Task.Run(() => Osd.RunAsync(cts.Token), cts.Token);
     }
 
-    ~RT4K()
+    public void Start()
     {
-        cts.Cancel();
+        lock (lifecycle)
+        {
+            ObjectDisposedException.ThrowIf(cts.IsCancellationRequested, this);
+            workers ??= Task.Run(() => Task.WhenAll(PollAsync(), Osd.RunAsync(cts.Token)));
+        }
+    }
+
+    private async Task PollAsync()
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            await RefreshPowerAsync();
+            await Task.Delay(Power == PowerState.On ? PollIntervalOnMs : PollIntervalOffMs, cts.Token);
+        }
+    }
+
+    public async Task StopAsync()
+    {
+        Task? pending;
+        lock (lifecycle)
+        {
+            cts.Cancel();
+            pending = workers;
+        }
+
+        if (pending != null)
+        {
+            try { await pending; }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        }
     }
 
     /// <summary>
@@ -252,7 +268,7 @@ public class RT4K
         {
             // Line 4 (the error counters) is the last line every build emits, but the profile
             // line follows it on newer builds, so just collect whatever arrives in the window.
-            var lines = await serial.SendCommandAsync("status", line => line.StartsWith("status oerr="), StatusTimeoutMs, echoIf: replies =>
+            var lines = await serial.SendCommandAsync("status", line => line.StartsWith("status oerr="), StatusTimeoutMs, token: cts.Token, echoIf: replies =>
             {
                 string fingerprint = StatusFingerprint(replies);
 

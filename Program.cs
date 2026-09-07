@@ -35,6 +35,8 @@ public partial class Program
     private const int ShutdownTimeoutMs = 5000;
 
     private static int shuttingDown;
+    private static readonly Lock shutdownLock = new();
+    private static Task? shutdownTask;
 
     private static PosixSignalRegistration[]? signalRegistrations;
 
@@ -71,6 +73,7 @@ public partial class Program
         Console.SetOut(logger);
         
         Console.WriteLine($"rt4k_pi v{VERSION}\n");
+        Settings.Load();
 
         // We don't actually support Windows, but it's useful for testing.
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -94,21 +97,75 @@ public partial class Program
                 PosixSignalRegistration.Create(PosixSignal.SIGINT, HandleShutdownSignal)
             ];
 
-            FuseDaemon = new();
         }
 
         Serial = new Serial(2000000);
         RT4K = new RT4K(Serial);
         Ser2net = new Ser2net(Serial, 2000);
+        Settings.Ser2netChanged += ApplySer2netSetting;
 
-        if (Settings.EnableSer2net)
+        try
         {
-            Ser2net.Start();
+            Serial.Start();
+            RT4K.Start();
+            ApplySer2netSetting(Settings.EnableSer2net);
+            if (OperatingSystem.IsLinux())
+            {
+                FuseDaemon = new();
+            }
+
+            RunWeb();
+        }
+        finally
+        {
+            Settings.Ser2netChanged -= ApplySer2netSetting;
+            try { StopServicesAsync().WaitAsync(TimeSpan.FromMilliseconds(ShutdownTimeoutMs)).GetAwaiter().GetResult(); }
+            catch (Exception ex) { RawLog.WriteUrgent($"Shutdown error: {ex.Message}"); }
+        }
+    }
+
+    private static void ApplySer2netSetting(bool enabled)
+    {
+        if (Volatile.Read(ref shuttingDown) != 0)
+        {
+            return;
         }
 
-        Settings.Load();
+        if (enabled) { Ser2net?.Start(); }
+        else { Ser2net?.Stop(); }
+    }
 
-        RunWeb();
+    private static Task StopServicesAsync()
+    {
+        lock (shutdownLock)
+        {
+            return shutdownTask ??= Task.Run(async () =>
+            {
+                Interlocked.Exchange(ref shuttingDown, 1);
+                Task tcpStopped = Ser2net?.StopAsync() ?? Task.CompletedTask;
+                Task deviceStopped = RT4K?.StopAsync() ?? Task.CompletedTask;
+                try
+                {
+                    if (OperatingSystem.IsLinux())
+                    {
+                        SerialFsOperations.Shutdown();
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        // Keep serial alive for FUSE teardown, then cancel any outstanding
+                        // command response windows before waiting for the remaining workers.
+                        if (Serial != null) { await Serial.StopAsync(); }
+                    }
+                    finally
+                    {
+                        await Task.WhenAll(tcpStopped, deviceStopped);
+                    }
+                }
+            });
+        }
     }
 
     /// <summary>
@@ -120,6 +177,7 @@ public partial class Program
     /// </summary>
     private static void HandleShutdownSignal(PosixSignalContext context)
     {
+        context.Cancel = true;
         // Lock-free and self-contained: the previous attempt logged through the normal path and
         // produced nothing at all for a SIGTERM we know arrived, which means the thread was
         // blocked before it ever got a line out.
@@ -133,12 +191,16 @@ public partial class Program
             return;
         }
 
-        context.Cancel = true;
-
         // Unmounting talks to systemctl and umount, and this has to finish inside
         // TimeoutStopSec. Doing it on a worker with a hard cap means a wedged umount costs us a
         // few seconds rather than the SIGKILL it used to.
-        bool unmounted = Task.Run(SerialFsOperations.Shutdown).Wait(ShutdownTimeoutMs);
+        bool unmounted;
+        try { unmounted = StopServicesAsync().Wait(ShutdownTimeoutMs); }
+        catch (Exception ex)
+        {
+            RawLog.WriteUrgent($"SIGNAL: shutdown failed: {ex.Message}");
+            unmounted = false;
+        }
 
         RawLog.WriteUrgent(unmounted
             ? "SIGNAL: unmount finished, exiting"

@@ -19,9 +19,10 @@ using System.Threading.Channels;
 
 public class SerialException(string message) : Exception(message);
 
-public class Serial
+public class Serial : IAsyncDisposable
 {
     public const int MaxPayload = Rtl1.MaxPayload;
+    public const int MaxCommandLength = 255;
 
     // Inactivity timeout the firmware applies to get/sget/osd/put sessions (XFER_IDLE_MS)
     private const int XferIdleMs = 4000;
@@ -33,9 +34,16 @@ public class Serial
     // capture covers the whole exchange rather than half of it (see SendCommandCoreAsync).
     private const int TrailingReplyMs = 50;
 
-    public bool IsConnected { get; private set; }
+    public bool IsConnected => Volatile.Read(ref port) != null;
 
-    private Stream port = null!;
+    private Stream? port;
+    private readonly Lock readerLock = new();
+    private readonly Lock lifecycleLock = new();
+    private readonly int baudRate;
+    private Task? connectionTask;
+    private Task? processingTask;
+    private Task? stopTask;
+    private Thread? readThread;
     private readonly HashSet<Action<byte[]>> readers = [];
     private readonly HashSet<Action<string>> stringReaders = [];
     private readonly Encoding encoding = Encoding.Latin1;
@@ -79,31 +87,46 @@ public class Serial
 
     public Serial(int baudRate)
     {
+        this.baudRate = baudRate;
         decoder = new Rtl1Decoder(HandleFrame, HandleText);
+    }
 
-        Task.Run(async () =>
+    public void Start()
+    {
+        lock (lifecycleLock)
+        {
+            ObjectDisposedException.ThrowIf(stopTask != null, this);
+            if (connectionTask != null)
+            {
+                return;
+            }
+
+            readThread = new Thread(HandleRead) { IsBackground = true, Priority = ThreadPriority.Highest, Name = "Serial drain" };
+            readThread.Start();
+            processingTask = Task.Run(ProcessRead);
+            connectionTask = Task.Run(ConnectAsync);
+        }
+    }
+
+    private async Task ConnectAsync()
+    {
+        try
         {
             if (GetPort() == null)
             {
                 Console.WriteLine("Serial port does not exist, waiting for connection.");
             }
 
-            // The drain must never be descheduled while bytes are arriving with no flow control,
-            // so it gets a dedicated high priority thread rather than a pool thread.
-            var readThread = new Thread(HandleRead) { IsBackground = true, Priority = ThreadPriority.Highest, Name = "Serial drain" };
-            readThread.Start();
-
-            _ = Task.Run(ProcessRead, cts.Token);
-
             while (!cts.Token.IsCancellationRequested)
             {
+                Stream? current = Volatile.Read(ref port);
                 try
                 {
-                    if (IsConnected && !isWindows && !File.Exists((port as FileStream)?.Name ?? ""))
+                    if (current is FileStream file && !isWindows && !File.Exists(file.Name))
                     {
                         throw new IOException("Serial port disconnected");
                     }
-                    else if (!IsConnected)
+                    else if (current == null)
                     {
                         var currentPort = GetPort();
                         if (currentPort != null)
@@ -111,6 +134,7 @@ public class Serial
                             Console.WriteLine($"Detected serial port at {currentPort}");
                             Console.WriteLine($"Connecting to {currentPort}");
 
+                            Stream connected;
                             if (!isWindows)
                             {
                                 // crtscts is mandatory: streaming put relies on the device raising
@@ -126,37 +150,74 @@ public class Serial
                                 // Unbuffered: a tty is not a file, every Read/Write should map
                                 // straight onto one syscall instead of being staged through
                                 // FileStream's 4 KB buffer.
-                                port = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None, bufferSize: 0);
+                                connected = new FileStream(currentPort, FileMode.Open, FileAccess.ReadWrite, FileShare.None, bufferSize: 0);
                             }
                             else
                             {
 #if USE_SYSTEM_IO_PORTS
-                                port = WindowsSerialPort.OpenAndConfigure(currentPort, baudRate);
+                                connected = WindowsSerialPort.OpenAndConfigure(currentPort, baudRate);
 #else
                                 throw new PlatformNotSupportedException("System.IO.Ports is excluded from non-Windows builds.");
 #endif
                             }
+                            Volatile.Write(ref port, connected);
                             Console.WriteLine($"Connected to {currentPort}");
-                            IsConnected = true;
                         }
                     }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Serial error: {ex.Message}");
-                    IsConnected = false;
-                    port?.Dispose();
+                    if (current != null) { Disconnect(current); }
                 }
 
-                await Task.Delay(2000);
+                await Task.Delay(2000, cts.Token);
             }
-        }, cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+        }
     }
 
-    ~Serial()
+    public Task StopAsync()
+    {
+        lock (lifecycleLock)
+        {
+            return stopTask ??= StopCoreAsync();
+        }
+    }
+
+    private async Task StopCoreAsync()
     {
         cts.Cancel();
-        port?.Close();
+        if (connectionTask != null)
+        {
+            await connectionTask;
+        }
+
+        Interlocked.Exchange(ref port, null)?.Dispose();
+        incoming.Writer.TryComplete();
+        if (processingTask != null)
+        {
+            try { await processingTask; }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        }
+
+        if (readThread != null && !readThread.Join(2000))
+        {
+            Console.WriteLine("Serial drain did not stop within 2000ms");
+        }
+    }
+
+    public ValueTask DisposeAsync() => new(StopAsync());
+
+    private void Disconnect(Stream failed)
+    {
+        // A read on an old connection may fail after the reconnect loop has opened a new one.
+        if (ReferenceEquals(Interlocked.CompareExchange(ref port, null, failed), failed))
+        {
+            failed.Dispose();
+        }
     }
 
     // The FTDI driver defaults to a 16 ms latency timer: it won't forward a short read up to the
@@ -225,7 +286,8 @@ public class Serial
 
         while (!cts.Token.IsCancellationRequested)
         {
-            if (!IsConnected)
+            Stream? current = Volatile.Read(ref port);
+            if (current == null)
             {
                 Thread.Sleep(100);
                 continue;
@@ -237,18 +299,16 @@ public class Serial
             try
             {
                 // Blocks until there's data
-                read = port.Read(readBuf, 0, readBuf.Length);
+                read = current.Read(readBuf, 0, readBuf.Length);
+                if (read == 0)
+                {
+                    throw new IOException("Serial port closed");
+                }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Serial error: {ex.Message}");
-                IsConnected = false;
-                port.Dispose();
-                continue;
-            }
-
-            if (read <= 0)
-            {
+                Disconnect(current);
                 continue;
             }
 
@@ -260,8 +320,13 @@ public class Serial
     {
         await foreach (byte[] data in incoming.Reader.ReadAllAsync(cts.Token))
         {
-            // Raw readers (ser2net and friends) always see the unmodified stream
-            foreach (Action<byte[]> action in readers.ToArray())
+            Action<byte[]>[] snapshot;
+            lock (readerLock)
+            {
+                snapshot = readers.ToArray();
+            }
+
+            foreach (Action<byte[]> action in snapshot)
             {
                 try
                 {
@@ -338,7 +403,13 @@ public class Serial
 
     private void DispatchLine(string line)
     {
-        foreach (Action<string> stringAction in stringReaders.ToArray())
+        Action<string>[] snapshot;
+        lock (readerLock)
+        {
+            snapshot = stringReaders.ToArray();
+        }
+
+        foreach (Action<string> stringAction in snapshot)
         {
             try
             {
@@ -363,23 +434,23 @@ public class Serial
         sessionLines?.Writer.TryWrite(line);
     }
 
-    public void RegisterReader(Action<byte[]> reader) => readers.Add(reader);
-    public void RegisterReader(Action<string> reader) => stringReaders.Add(reader);
+    public void RegisterReader(Action<byte[]> reader) { lock (readerLock) { readers.Add(reader); } }
+    public void RegisterReader(Action<string> reader) { lock (readerLock) { stringReaders.Add(reader); } }
 
-    public void UnregisterReader(Action<byte[]> reader) => readers.Remove(reader);
-    public void UnregisterReader(Action<string> reader) => stringReaders.Remove(reader);
+    public void UnregisterReader(Action<byte[]> reader) { lock (readerLock) { readers.Remove(reader); } }
+    public void UnregisterReader(Action<string> reader) { lock (readerLock) { stringReaders.Remove(reader); } }
 
     #endregion
 
     #region Writing
 
-    public void WriteLine(string data) => Write(encoding.GetBytes(data + '\n'));
+    private void WriteLine(string data) => Write(encoding.GetBytes(data + '\n'));
 
-    public void Write(byte[] data)
+    private void Write(byte[] data)
     {
         if (!IsConnected)
         {
-            return;
+            throw new SerialException($"Not connected to the {RT4K.DisplayName}");
         }
 
         // Don't echo binary frames to the console
@@ -390,16 +461,18 @@ public class Serial
 
         writeLock.Wait();
 
+        Stream? current = null;
         try
         {
-            port.Write(data);
-            port.Flush();
+            current = Volatile.Read(ref port) ?? throw new SerialException($"Not connected to the {RT4K.DisplayName}");
+            current.Write(data);
+            current.Flush();
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Serial error: {ex.Message}");
-            IsConnected = false;
-            port.Dispose();
+            if (current != null) { Disconnect(current); }
+            throw;
         }
         finally
         {
@@ -475,6 +548,34 @@ public class Serial
     // Strips the device's "[COM] " marker, returns null for anything that isn't a command reply
     public static string? StripComPrefix(string line) => line.StartsWith("[COM] ") ? line[6..] : null;
 
+    public static void ValidateTextCommand(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command) || command.Length > MaxCommandLength ||
+            command.Any(c => c < ' ' || c > '~'))
+        {
+            throw new ArgumentException($"Expected one printable ASCII command of at most {MaxCommandLength} characters.", nameof(command));
+        }
+
+        string verb = command.Trim().Split(' ', 2)[0].ToLowerInvariant();
+        if (verb is "get" or "put" or "sget" or "osd" or "osd2" or "font" or "rtl1")
+        {
+            throw new ArgumentException("Binary-session commands are not supported by the text interface.", nameof(command));
+        }
+    }
+
+    public Task<List<string>> SendTextCommandAsync(string command, CancellationToken token = default)
+    {
+        ValidateTextCommand(command);
+        // SD operations can take much longer than ordinary control commands.
+        string verb = command.Trim().Split(' ', 2)[0].ToLowerInvariant();
+        return verb switch
+        {
+            "ls" => SendCommandAsync(command, line => line.StartsWith("ls end") || line.StartsWith("ls err") || line.StartsWith("ls:"), 20000, token),
+            "sha256" => SendCommandAsync(command, line => line.StartsWith("sha256 ") || line.StartsWith("sha256:"), 60000, token),
+            _ => SendCommandAsync(command, token: token)
+        };
+    }
+
     /// <summary>
     /// Sends a command line and collects the "[COM] " reply lines (with the marker stripped).
     /// Collection stops when <paramref name="isTerminal"/> matches a line, or on timeout.
@@ -484,13 +585,20 @@ public class Serial
     /// </summary>
     public async Task<List<string>> SendCommandAsync(string command, Func<string, bool>? isTerminal = null, int timeoutMs = 1000, CancellationToken token = default, Func<List<string>, bool>? echoIf = null)
     {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
+        token = linked.Token;
         // A binary session owns the wire for its duration: an ASCII command sent into an open
         // RTL1 stream desyncs it and the transfer dies on a timeout, so wait our turn.
         await sessionLock.WaitAsync(token);
 
         try
         {
-            return await SendCommandCoreAsync(command, isTerminal, timeoutMs, token, echoIf);
+            token.ThrowIfCancellationRequested();
+            // Once sent, finish collecting the reply before handing the wire to another caller.
+            // Canceling a browser/TCP request must not make its late reply belong to a new command.
+            List<string> replies = await SendCommandCoreAsync(command, isTerminal, timeoutMs, cts.Token, echoIf);
+            token.ThrowIfCancellationRequested();
+            return replies;
         }
         finally
         {
@@ -512,7 +620,7 @@ public class Serial
         try
         {
             var lines = new ConcurrentQueue<string>();
-            var complete = new TaskCompletionSource();
+            var complete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
             void handler(string line)
             {
@@ -552,7 +660,12 @@ public class Serial
                 else
                 {
                     // A timeout is a normal outcome (the device is off, or the command is a no-op)
-                    await Task.WhenAny(complete.Task, Task.Delay(timeoutMs, token));
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    Task delay = Task.Delay(timeoutMs, timeout.Token);
+                    Task finished = await Task.WhenAny(complete.Task, delay);
+                    await finished;
+                    token.ThrowIfCancellationRequested();
+                    timeout.Cancel();
 
                     // The terminal line is not always the last thing the device sends: "status"
                     // ends on "status oerr=" but still emits "status profile=..." afterwards.
@@ -773,6 +886,8 @@ public class Serial
 
     private async Task<T> RunSessionAsync<T>(string command, string verb, string terminalLine, Func<string, Task<T>> body, CancellationToken token, int terminalTimeoutMs = XferIdleMs, bool quiet = false)
     {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
+        token = linked.Token;
         if (!IsConnected)
         {
             throw new SerialException($"Not connected to the {RT4K.DisplayName}");
