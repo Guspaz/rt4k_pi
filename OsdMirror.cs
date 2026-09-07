@@ -27,6 +27,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     // The banner only changes when a profile is loaded or the user picks a new image, so it's
     // checked on this much slower cadence instead of once per captured frame.
     private const int BannerCheckMs = 5000;
+    private const string DefaultBannerPath = "/image/default.bmp";
 
     // How long a client heartbeat keeps the mirror capturing. Must comfortably exceed the
     // client's heartbeat interval so an in-flight request never lets the lease lapse.
@@ -49,6 +50,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     private string? bannerPath;
     private Bitmap? banner;
     private DateTime lastBannerCheck = DateTime.MinValue;
+    private string? lastBannerError;
 
     // Cleared whenever the OSD goes away, so the banner is re-checked when it next appears
     private bool bannerChecked;
@@ -284,7 +286,6 @@ public class OsdMirror(Serial serial, RT4K rt4k)
             if (!bannerChecked)
             {
                 await RefreshBannerAsync(token);
-                bannerChecked = true;
             }
 
             // Composed from whatever banner we last fetched: it changes only on a profile or
@@ -454,31 +455,14 @@ public class OsdMirror(Serial serial, RT4K rt4k)
         {
             // Next time the OSD comes up, check before trusting the cached banner
             bannerChecked = false;
+            lastBannerCheck = DateTime.MinValue;
             return;
         }
 
-        if (bannerChecked && (DateTime.UtcNow - lastBannerCheck).TotalMilliseconds < BannerCheckMs)
+        // The frame we just published was composed with the previous banner, so redraw it.
+        if (await RefreshBannerAsync(token))
         {
-            return;
-        }
-
-        try
-        {
-            bool bannerChanged = await RefreshBannerAsync(token);
-            bannerChecked = true;
-
-            // The frame we just published was composed with the previous banner, so redraw it
-            if (bannerChanged)
-            {
-                await CaptureAsync(token);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            if (Program.Settings.VerboseLogging)
-            {
-                Console.WriteLine($"OSD banner check failed: {ex.Message}");
-            }
+            await CaptureAsync(token);
         }
     }
 
@@ -488,54 +472,78 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     /// <returns>True if the banner image changed, so anything showing it needs recomposing.</returns>
     private async Task<bool> RefreshBannerAsync(CancellationToken token)
     {
+        if ((DateTime.UtcNow - lastBannerCheck).TotalMilliseconds < BannerCheckMs)
+        {
+            return false;
+        }
+
         lastBannerCheck = DateTime.UtcNow;
-
-        var lines = await serial.SendCommandAsync("banner", line => line.StartsWith("banner="), token: token, echoIf: _ => Program.Settings.VerboseLogging);
-        string? line = lines.FirstOrDefault(l => l.StartsWith("banner="));
-
-        if (line == null)
-        {
-            return false;
-        }
-
-        var fields = Serial.ParseFields(line);
-
-        // "path" is directly get-able and already carries its extension; don't touch it
-        string? path = fields.GetValueOrDefault("banner") == "1" ? fields.GetValueOrDefault("path") : null;
-
-        if (path == bannerPath)
-        {
-            return false;
-        }
-
-        bannerPath = path;
-        banner = null;
-
-        if (path == null)
-        {
-            // Only worth reporting if there was actually one on screen before
-            if (bannerChecked)
-            {
-                Console.WriteLine("OSD banner cleared");
-            }
-
-            return true;
-        }
 
         try
         {
-            banner = Bmp.Decode(await serial.GetFileAsync(path, token: token, quiet: true));
+            var lines = await serial.SendCommandAsync("banner", line => line.StartsWith("banner="), token: token, echoIf: _ => Program.Settings.VerboseLogging);
+            string? line = lines.FirstOrDefault(l => l.StartsWith("banner="));
+            if (line == null)
+            {
+                throw new SerialException("No banner state returned by the device.");
+            }
 
-            // The transfer itself is silenced above, so report the change ourselves: it's rare
-            // (a new profile or a user-picked image) and worth seeing without verbose on.
-            Console.WriteLine($"OSD banner changed to {path}");
+            string path = ResolveBannerPath(line);
+            if (path == bannerPath && banner != null)
+            {
+                bannerChecked = true;
+                lastBannerError = null;
+                return false;
+            }
+
+            Bitmap loaded = Bmp.Decode(await serial.GetFileAsync(path, token: token, quiet: true))
+                ?? throw new InvalidDataException($"Invalid banner bitmap: {path}");
+            // Commit only after download and decode succeed, so a failed first fetch can retry
+            // the same path and a failed replacement doesn't discard the last good image.
+            banner = loaded;
+            bannerPath = path;
+            bannerChecked = true;
+            lastBannerError = null;
+
+            Console.WriteLine($"OSD banner loaded from {path}");
+            return true;
         }
-        catch (SerialException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Console.WriteLine($"Could not read OSD banner {path}: {ex.Message}");
+            if (lastBannerError != ex.Message || Program.Settings.VerboseLogging)
+            {
+                Console.WriteLine($"OSD banner check failed: {ex.Message}");
+            }
+            lastBannerError = ex.Message;
+            return false;
+        }
+    }
+
+    private static string ResolveBannerPath(string line)
+    {
+        string? state = Serial.ParseFields(line).GetValueOrDefault("banner");
+        if (state == "0")
+        {
+            // An unset profile filename still displays the firmware's default banner.
+            return DefaultBannerPath;
         }
 
-        return true;
+        const string pathMarker = " path=";
+        int start = line.IndexOf(pathMarker, StringComparison.Ordinal);
+        if (state != "1" || start < 0)
+        {
+            throw new SerialException($"Invalid banner state: {line}");
+        }
+
+        start += pathMarker.Length;
+        int end = line.IndexOf(" file=", start, StringComparison.Ordinal);
+        string path = (end < 0 ? line[start..] : line[start..end]).Trim();
+        if (path.Length == 0)
+        {
+            throw new SerialException($"Missing banner path: {line}");
+        }
+
+        return path;
     }
 
     /// <summary>Composites the planes side by side, with the banner overlaid on the primary.</summary>

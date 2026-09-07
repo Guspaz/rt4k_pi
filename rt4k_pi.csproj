@@ -54,4 +54,8 @@
     <None Remove="Static\w3.css" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include=".github\copilot-instructions.md" />
+  </ItemGroup>
+
 </Project>
