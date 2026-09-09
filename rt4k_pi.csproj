@@ -37,7 +37,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseSystemIOPorts)' != 'true'">
-    <Compile Remove="WindowsSerialPort.cs" />
+    <Compile Remove="Communication/WindowsSerialPort.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -45,7 +45,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="Tests/**/*.cs" />
+    <Compile Remove="Tests/**/*.cs"/>
     <Content Remove="Tests/**" />
     <None Remove="Tests/**" />
   </ItemGroup>
