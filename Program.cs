@@ -4,9 +4,6 @@
  * - Some sort of SVS command support
  * - Readme page
  * - Backup settings to RT4K (requires serial file IO)
- * - SD card access (requires serial file IO)
- * - RT4K automated firmware update (requires serial file IO, possibly firmware-related query and update commands)
- * - Web-based firmware renaming/management (requires serial file IO)
  * - Better mobile experience
  * - Look into generating minimal images with pi-gen-micro
  */
@@ -28,6 +25,7 @@ public partial class Program
     public static StatusDaemon StatusDaemon { get; } = new();
     public static SettingsDaemon Settings { get; } = new();
     public static Installer Installer { get; } = new();
+    public static FirmwareUpdater? Firmware { get; private set; }
 
     private static readonly Logger logger = new();
 
@@ -142,6 +140,11 @@ public partial class Program
             return shutdownTask ??= Task.Run(async () =>
             {
                 Interlocked.Exchange(ref shuttingDown, 1);
+                if (Firmware != null)
+                {
+                    try { await Firmware.StopAsync().WaitAsync(TimeSpan.FromSeconds(2)); }
+                    catch (Exception ex) { RawLog.WriteUrgent($"Firmware shutdown: {ex.Message}; any unfinished operation will require recovery."); }
+                }
                 Task tcpStopped = Ser2net?.StopAsync() ?? Task.CompletedTask;
                 Task deviceStopped = RT4K?.StopAsync() ?? Task.CompletedTask;
                 try

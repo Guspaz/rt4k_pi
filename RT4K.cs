@@ -256,6 +256,7 @@ public class RT4K
     /// </summary>
     public async Task<PowerState> RefreshPowerAsync()
     {
+        if (serial.IsMaintenance) { return Power; }
         if (!serial.IsConnected)
         {
             Power = PowerState.Unknown;
@@ -335,6 +336,10 @@ public class RT4K
             Power = PowerState.On;
             Publish();
 
+            return Power;
+        }
+        catch (SerialException) when (serial.IsMaintenance)
+        {
             return Power;
         }
         catch (Exception ex)

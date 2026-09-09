@@ -51,7 +51,15 @@ public class Serial : IAsyncDisposable
     private readonly SemaphoreSlim writeLock = new(1, 1);
     private readonly SemaphoreSlim commandLock = new(1, 1);
     private readonly SemaphoreSlim sessionLock = new(1, 1);
+    private readonly SemaphoreSlim operationLock = new(1, 1);
+    private readonly AsyncLocal<bool> exclusiveOwner = new();
+    private int maintenance;
+    private long connectionRevision;
+    public bool IsMaintenance => Volatile.Read(ref maintenance) != 0;
+    public long ConnectionRevision => Interlocked.Read(ref connectionRevision);
     private readonly StringBuilder lineBuffer = new();
+    private bool textLineHasContent;
+    private bool textLineHasNull;
     private readonly Rtl1Decoder decoder;
 
     // Decouples the raw drain from all downstream processing (see HandleRead)
@@ -161,6 +169,7 @@ public class Serial : IAsyncDisposable
 #endif
                             }
                             Volatile.Write(ref port, connected);
+                            Interlocked.Increment(ref connectionRevision);
                             Console.WriteLine($"Connected to {currentPort}");
                         }
                     }
@@ -355,7 +364,25 @@ public class Serial : IAsyncDisposable
 
     private void HandleText(byte[] data)
     {
-        string receivedData = encoding.GetString(data);
+        // NULs are not text: terminals hide them, while HTML renders replacement
+        // characters. Track across reads so NUL-only reboot lines stay out of logs.
+        var text = new StringBuilder(data.Length);
+        foreach (char value in encoding.GetString(data))
+        {
+            if (value == '\0') { textLineHasNull = true; continue; }
+            if (value is '\r' or '\n')
+            {
+                if (!textLineHasNull || textLineHasContent) { text.Append(value); }
+                if (value == '\n') { textLineHasContent = false; textLineHasNull = false; }
+            }
+            else
+            {
+                textLineHasContent = true;
+                text.Append(value);
+            }
+        }
+        string receivedData = text.ToString();
+        if (receivedData.Length == 0) { return; }
 
         Echo(receivedData, ConsoleColor.Green);
 
@@ -587,6 +614,7 @@ public class Serial : IAsyncDisposable
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
         token = linked.Token;
+        using var operation = await EnterOperationAsync(token);
         // A binary session owns the wire for its duration: an ASCII command sent into an open
         // RTL1 stream desyncs it and the transfer dies on a timeout, so wait our turn.
         await sessionLock.WaitAsync(token);
@@ -734,6 +762,102 @@ public class Serial : IAsyncDisposable
     #endregion
 
     #region RTL1 binary sessions
+
+    public async Task RunExclusiveAsync(Func<CancellationToken, Task> action, CancellationToken token)
+    {
+        if (Interlocked.CompareExchange(ref maintenance, 1, 0) != 0) { throw new SerialException("The serial connection is reserved for firmware maintenance."); }
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
+        bool acquired = false;
+        try
+        {
+            await operationLock.WaitAsync(linked.Token);
+            acquired = true;
+            exclusiveOwner.Value = true;
+            await action(linked.Token);
+        }
+        finally
+        {
+            exclusiveOwner.Value = false;
+            if (acquired) { operationLock.Release(); }
+            Volatile.Write(ref maintenance, 0);
+        }
+    }
+
+    private sealed class OperationLease(SemaphoreSlim gate) : IDisposable
+    {
+        public void Dispose() => gate.Release();
+    }
+
+    private async Task<IDisposable?> EnterOperationAsync(CancellationToken token)
+    {
+        if (exclusiveOwner.Value) { return null; }
+        if (IsMaintenance) { throw new SerialException("The serial connection is reserved for firmware maintenance."); }
+        await operationLock.WaitAsync(token);
+        if (IsMaintenance)
+        {
+            operationLock.Release();
+            throw new SerialException("The serial connection is reserved for firmware maintenance.");
+        }
+        return new OperationLease(operationLock);
+    }
+
+    public async Task PutFirmwareFileAsync(string path, Stream data, long length, string sha256, Action<long> progress, CancellationToken token)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
+        token = linked.Token;
+        Stream connection = Volatile.Read(ref port) ?? throw new SerialException("Serial disconnected.");
+        int putTimeoutMs = PutBaseTimeoutMs + (int)(length / PutBytesPerMs);
+        await RunSessionAsync($"put {length} {sha256} {path}", "put", "put done", async ready =>
+        {
+            ushort nonce = ParseNonce(ready);
+            byte seq = 0;
+            byte[] buffer = new byte[MaxPayload];
+            long sent = 0;
+            try
+            {
+                while (sent < length)
+                {
+                    token.ThrowIfCancellationRequested();
+                    // CTS supplies backpressure. Streaming requires full payloads, one
+                    // partial, then EOF; progress counts writes, not device acknowledgments.
+                    int count = (int)Math.Min(buffer.Length, length - sent);
+                    await data.ReadExactlyAsync(buffer.AsMemory(0, count), token);
+                    await WriteFirmwareFrameAsync(connection, nonce, Rtl1Type.Data, seq, buffer.AsMemory(0, count), token);
+                    seq++;
+                    sent += count;
+                    progress(sent);
+                }
+                token.ThrowIfCancellationRequested();
+                await WriteFirmwareFrameAsync(connection, nonce, Rtl1Type.Data, seq, ReadOnlyMemory<byte>.Empty, token);
+                return true;
+            }
+            catch
+            {
+                if (ReferenceEquals(connection, Volatile.Read(ref port)))
+                {
+                    try { await WriteFirmwareFrameAsync(connection, nonce, Rtl1Type.Abort, seq, ReadOnlyMemory<byte>.Empty, cts.Token); }
+                    catch (Exception ex) { Console.WriteLine($"Firmware upload abort: {ex.Message}"); }
+                }
+                throw;
+            }
+        }, token, terminalTimeoutMs: putTimeoutMs, quiet: true, recoverOnFailure: true);
+    }
+
+    private async Task WriteFirmwareFrameAsync(Stream connection, ushort nonce, Rtl1Type type, byte seq, ReadOnlyMemory<byte> payload, CancellationToken token)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
+        timeout.CancelAfter(XferIdleMs);
+        await writeLock.WaitAsync(timeout.Token);
+        try
+        {
+            if (!ReferenceEquals(connection, Volatile.Read(ref port))) { throw new SerialException("Serial connection changed during firmware upload."); }
+            // Closing the old stream also breaks a tty write blocked indefinitely on CTS.
+            using var cancellation = timeout.Token.Register(() => Disconnect(connection));
+            await connection.WriteAsync(Rtl1.Encode(nonce, type, seq, payload.Span), timeout.Token);
+            await connection.FlushAsync(timeout.Token);
+        }
+        finally { writeLock.Release(); }
+    }
 
     /// <summary>Downloads a file (or a range of one) from the RT4K's SD card.</summary>
     /// <remarks>
@@ -884,10 +1008,11 @@ public class Serial : IAsyncDisposable
     /// </summary>
     private const double PutBytesPerMs = 20.0;
 
-    private async Task<T> RunSessionAsync<T>(string command, string verb, string terminalLine, Func<string, Task<T>> body, CancellationToken token, int terminalTimeoutMs = XferIdleMs, bool quiet = false)
+    private async Task<T> RunSessionAsync<T>(string command, string verb, string terminalLine, Func<string, Task<T>> body, CancellationToken token, int terminalTimeoutMs = XferIdleMs, bool quiet = false, bool recoverOnFailure = false)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
         token = linked.Token;
+        using var operation = await EnterOperationAsync(token);
         if (!IsConnected)
         {
             throw new SerialException($"Not connected to the {RT4K.DisplayName}");
@@ -948,6 +1073,13 @@ public class Serial : IAsyncDisposable
             await WaitForSessionLineAsync(terminalLine, verb, terminalTimeoutMs, token);
 
             return result;
+        }
+        catch when (recoverOnFailure)
+        {
+            // An opener may have reached the device even if its ready line was lost. Do not
+            // release the wire until its idle timeout and quarantine have both elapsed.
+            await Task.Delay(XferIdleMs + 1000, cts.Token);
+            throw;
         }
         finally
         {

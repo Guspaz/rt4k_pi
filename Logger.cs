@@ -27,6 +27,7 @@ public class Logger : TextWriter
     // never terminated can't run into whatever gets logged next.
     private bool atLineStart = true;
     private ConsoleColor lastColor = ConsoleColor.Green;
+    private readonly ThreadLocal<bool> suppressedInfoLine = new(() => false);
 
     /// <summary>Writes text in an explicit colour, immune to what other threads are doing.</summary>
     public static void Write(string text, ConsoleColor color)
@@ -87,10 +88,23 @@ public class Logger : TextWriter
         // loop it's the only record of what the run was doing when it died.
         RawLog.WriteFragment(entryText);
 
-        if (isVerboseLog && !Program.Settings.VerboseLogging)
+        var visible = new StringBuilder();
+        int offset = 0;
+        while (offset < entryText.Length)
         {
-            return;
+            int newline = entryText.IndexOf('\n', offset);
+            int end = newline < 0 ? entryText.Length : newline + 1;
+            string fragment = entryText[offset..end];
+            if (fragment.StartsWith("info: ") && !Program.Settings.VerboseLogging)
+            {
+                suppressedInfoLine.Value = true;
+            }
+            if (!suppressedInfoLine.Value) { visible.Append(fragment); }
+            if (newline >= 0) { suppressedInfoLine.Value = false; }
+            offset = end;
         }
+        entryText = visible.ToString();
+        if (entryText.Length == 0) { return; }
 
         if (isVerboseLog)
         {

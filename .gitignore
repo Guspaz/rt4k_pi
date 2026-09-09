@@ -369,6 +369,7 @@ stop
 
 # App settings from testing
 settings.json
+firmware-update/
 
 # Internal documentation
 PROTOCOL*.md

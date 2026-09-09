@@ -45,6 +45,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
+    <Content Remove="Tests/**" />
+    <None Remove="Tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Remove="Static\dmt_timings.js" />
     <None Remove="Static\imageMapResizer.min.js" />
     <None Remove="Static\jquery-3.4.1.min.js" />

@@ -69,6 +69,7 @@ public partial class Program
         MapAdministration(app);
         MapDeviceCommands(app);
         MapDeviceStreams(app, appState);
+        MapFirmware(app);
 
         Console.WriteLine("rt4k_pi startup complete.");
         app.Run();
@@ -80,6 +81,7 @@ public partial class Program
         app.MapGet("/RemoteOSD", () => Results.RazorSlice<Slices.RemoteOSD, Slices.AppState>(appState));
         app.MapGet("/Calculator", () => Results.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
         app.MapGet("/Settings", () => Results.RazorSlice<Slices.Settings, Slices.AppState>(appState));
+        app.MapGet("/Firmware", () => Results.RazorSlice<Slices.Firmware, Slices.AppState>(appState));
         app.MapGet("/DebugLog", () => Results.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
     }
 
@@ -87,7 +89,18 @@ public partial class Program
     {
         app.MapGet("/GetUpdateStatus", () => Installer.GetStatus());
         app.MapGet("/CheckUpdates", () => Installer.CheckUpdateAsync());
-        app.MapPost("/InstallUpdate", () => Installer.DoUpdate());
+        app.MapPost("/InstallUpdate", () =>
+        {
+            lock (updateStartLock)
+            {
+                if (Firmware?.Status is { Active: true } or { NeedsRecovery: true })
+                {
+                    return Results.Text("Finish RT4K firmware maintenance before updating rt4k_pi.", statusCode: 409);
+                }
+                Installer.DoUpdate();
+            }
+            return Results.Ok();
+        });
         app.MapPost("/UpdateSetting/{name}/{value}", ([FromRoute] string name, [FromRoute] string value) => Settings.UpdateSetting(name, value));
 
         // The raw log is deliberately a file download rather than a page: it can be tens of

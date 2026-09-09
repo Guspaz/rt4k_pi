@@ -1,0 +1,55 @@
+@inherits RazorSlice<AppState>
+@implements IUsesLayout<_Layout, LayoutModel>
+
+@functions {
+	public LayoutModel LayoutModel => new() { Title = "Firmware" };
+}
+
+<details id="firmwareWarning" class="w3-panel w3-pale-yellow w3-border" style="max-width: 900px;" open>
+	<summary style="cursor: pointer; padding: 12px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+		<strong>Before you update: keep the Pi and RT4K powered on</strong>
+		<span id="firmwareWarningAction" class="w3-button w3-border w3-round" style="white-space: nowrap;">Collapse &#8722;</span>
+	</summary>
+	<p>Do not unplug either device during installation. Unplugging the Pi can also turn off the RT4K.</p>
+	<p>You can cancel while files are downloading or being sent. Once installation starts, wait until it finishes.</p>
+	<p>Firmware <strong>@rt4k_pi.FirmwareUpdater.MinimumSupportedVersion.ToString()</strong> or newer is required.
+		Older versions are listed for their changelogs only.
+		<a href="https://retrotink-llc.github.io/firmware/4k.html" target="_blank" rel="noopener noreferrer">Official update instructions</a>.</p>
+</details>
+
+<h2>Update status</h2>
+<div class="w3-panel">
+	<table class="w3-table-all w3-card" style="max-width: 900px;">
+		<tr><th style="width: 25%;">Connected device</th><td id="firmwareModel">Checking device...</td></tr>
+		<tr><th>Current firmware</th><td id="currentFirmware">Checking device...</td></tr>
+		<tr><th>Latest available</th><td><span id="latestFirmware">Loading releases...</span> <button class="@LayoutModel.ButtonClasses" id="installLatest" type="button" disabled>Install latest</button></td></tr>
+		<tr><th>Update</th><td><strong id="firmwarePhase">Checking...</strong><span id="firmwareTarget"></span></td></tr>
+		<tr><th>Progress</th><td>
+			<div id="firmwareMessage" role="status" aria-live="polite">Connecting to the Pi...</div>
+			<progress id="firmwareProgress" style="width: 100%;" aria-label="Firmware operation progress" hidden></progress>
+			<div id="firmwareBytes"></div>
+			<button class="@LayoutModel.ButtonClasses" id="cancelFirmware" type="button" disabled hidden>Cancel update</button>
+		</td></tr>
+	</table>
+	<p>
+		<input class="w3-check" type="checkbox" id="includeExperimental" checked />
+		<label for="includeExperimental">Include experimental firmware</label>
+		<button class="@LayoutModel.ButtonClasses" id="refreshFirmware" type="button">Refresh releases</button>
+	</p>
+	<p id="firmwareCatalogError" class="w3-text-red" role="alert" hidden></p>
+	<p id="firmwareConnectionError" class="w3-text-red" role="alert" hidden></p>
+	<p id="firmwareActionError" class="w3-text-red" role="alert" hidden></p>
+	<p class="w3-small" style="max-width: 900px;">You can leave this page and return to check progress; the update keeps running.
+		Remote control and file sharing pause during an update.
+		Interrupted transfers are not resumed. Completed files stay on the RT4K; temporary downloads on the Pi are removed.</p>
+</div>
+
+<h2>Recent firmware and changelogs</h2>
+<div class="w3-panel">
+	<p>Select a version above to read its changelog, or install an earlier supported version to downgrade.
+		Source: <a href="https://retrotink-llc.github.io/firmware/" target="_blank" rel="noopener noreferrer">RetroTINK firmware</a>.</p>
+	<div id="firmwareReleases" style="max-width: 900px;"></div>
+	<p><button class="@LayoutModel.ButtonClasses" id="moreFirmware" type="button" hidden>Show older releases</button></p>
+</div>
+<noscript><p class="w3-text-red">JavaScript is required to manage firmware updates and show live progress.</p></noscript>
+<script src="/Static/firmware.js" defer></script>
