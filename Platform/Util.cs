@@ -2,7 +2,7 @@
 
 using System.Diagnostics;
 
-public class Util
+public partial class Util
 {
     // Long enough for anything we run that isn't apt (which passes its own), short enough that
     // a wedged command doesn't take the whole app down with it
@@ -100,8 +100,8 @@ public class Util
     /// <summary>Whether this process is already running as root, so sudo would be redundant.</summary>
     public static bool IsRoot { get; } = OperatingSystem.IsLinux() && geteuid() == 0;
 
-    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
-    private static extern uint geteuid();
+    [System.Runtime.InteropServices.LibraryImport("libc", SetLastError = true)]
+    private static partial uint geteuid();
 
     /// <summary>
     /// Collects what a finished command wrote, giving up rather than blocking if the pipe is

@@ -11,7 +11,7 @@ public partial class Program
         public bool IsConnected => serial.IsConnected;
         public long ConnectionRevision => serial.ConnectionRevision;
         public Task ExclusiveAsync(Func<CancellationToken, Task> action, CancellationToken token) => serial.RunExclusiveAsync(action, token);
-        public Task<List<string>> CommandAsync(string command, Func<string, bool> terminal, int timeoutMs, CancellationToken token) => serial.SendCommandAsync(command, terminal, timeoutMs, token);
+        public Task<List<string>> CommandAsync(string command, Func<string, bool> terminal, int timeoutMs, CancellationToken token) => serial.SendCommandAsync(command, terminal, timeoutMs, token: token);
         public Task UploadAsync(string path, Stream data, long length, string sha256, Action<long> progress, CancellationToken token) => serial.PutFirmwareFileAsync(path, data, length, sha256, progress, token);
     }
 
@@ -32,7 +32,7 @@ public partial class Program
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(45));
                 var releases = await catalog.GetAsync(timeout.Token);
-                return Results.Json(new FirmwareListing(releases.Where(r => experimental != false || !r.Experimental).ToArray()), FirmwareJsonContext.Default.FirmwareListing);
+                return Results.Json(new FirmwareListing([.. releases.Where(r => experimental != false || !r.Experimental)]), FirmwareJsonContext.Default.FirmwareListing);
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or OperationCanceledException)
             {

@@ -218,7 +218,11 @@ public class Serial : IAsyncDisposable
         }
     }
 
-    public ValueTask DisposeAsync() => new(StopAsync());
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+        GC.SuppressFinalize(this);
+    }
 
     private void Disconnect(Stream failed)
     {
@@ -303,7 +307,7 @@ public class Serial : IAsyncDisposable
             }
 
             byte[] readBuf = new byte[65536];
-            int read = 0;
+            int read;
 
             try
             {
@@ -332,7 +336,7 @@ public class Serial : IAsyncDisposable
             Action<byte[]>[] snapshot;
             lock (readerLock)
             {
-                snapshot = readers.ToArray();
+                snapshot = [.. readers];
             }
 
             foreach (Action<byte[]> action in snapshot)
@@ -433,7 +437,7 @@ public class Serial : IAsyncDisposable
         Action<string>[] snapshot;
         lock (readerLock)
         {
-            snapshot = stringReaders.ToArray();
+            snapshot = [.. stringReaders];
         }
 
         foreach (Action<string> stringAction in snapshot)
@@ -597,8 +601,8 @@ public class Serial : IAsyncDisposable
         string verb = command.Trim().Split(' ', 2)[0].ToLowerInvariant();
         return verb switch
         {
-            "ls" => SendCommandAsync(command, line => line.StartsWith("ls end") || line.StartsWith("ls err") || line.StartsWith("ls:"), 20000, token),
-            "sha256" => SendCommandAsync(command, line => line.StartsWith("sha256 ") || line.StartsWith("sha256:"), 60000, token),
+            "ls" => SendCommandAsync(command, line => line.StartsWith("ls end") || line.StartsWith("ls err") || line.StartsWith("ls:"), 20000, token: token),
+            "sha256" => SendCommandAsync(command, line => line.StartsWith("sha256 ") || line.StartsWith("sha256:"), 60000, token: token),
             _ => SendCommandAsync(command, token: token)
         };
     }
@@ -610,7 +614,7 @@ public class Serial : IAsyncDisposable
     /// is held back until it has run against the collected lines, so noisy polling commands can
     /// keep quiet unless something actually changed.
     /// </summary>
-    public async Task<List<string>> SendCommandAsync(string command, Func<string, bool>? isTerminal = null, int timeoutMs = 1000, CancellationToken token = default, Func<List<string>, bool>? echoIf = null)
+    public async Task<List<string>> SendCommandAsync(string command, Func<string, bool>? isTerminal = null, int timeoutMs = 1000, Func<List<string>, bool>? echoIf = null, CancellationToken token = default)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
         token = linked.Token;
@@ -624,7 +628,7 @@ public class Serial : IAsyncDisposable
             token.ThrowIfCancellationRequested();
             // Once sent, finish collecting the reply before handing the wire to another caller.
             // Canceling a browser/TCP request must not make its late reply belong to a new command.
-            List<string> replies = await SendCommandCoreAsync(command, isTerminal, timeoutMs, cts.Token, echoIf);
+            List<string> replies = await SendCommandCoreAsync(command, isTerminal, timeoutMs, echoIf, cts.Token);
             token.ThrowIfCancellationRequested();
             return replies;
         }
@@ -636,7 +640,7 @@ public class Serial : IAsyncDisposable
 
     // The command plane itself, without the session gate. Callers that already hold sessionLock
     // (i.e. the session openers in RunSessionAsync) must use this to avoid deadlocking on it.
-    private async Task<List<string>> SendCommandCoreAsync(string command, Func<string, bool>? isTerminal, int timeoutMs, CancellationToken token, Func<List<string>, bool>? echoIf)
+    private async Task<List<string>> SendCommandCoreAsync(string command, Func<string, bool>? isTerminal, int timeoutMs, Func<List<string>, bool>? echoIf, CancellationToken token)
     {
         if (!IsConnected)
         {
@@ -868,7 +872,7 @@ public class Serial : IAsyncDisposable
     /// Stream (or expose a chunked/ranged API) instead of materialising a byte[]. Needed before
     /// the FUSE/SMB layer can serve arbitrary files rather than small config blobs.
     /// </remarks>
-    public async Task<byte[]> GetFileAsync(string path, long offset = 0, long length = 0, CancellationToken token = default, bool quiet = false)
+    public async Task<byte[]> GetFileAsync(string path, long offset = 0, long length = 0, bool quiet = false, CancellationToken token = default)
     {
         string command = "get" + (offset > 0 ? $" -o {offset}" : "") + (length > 0 ? $" -l {length}" : "") + $" {path}";
 
@@ -892,14 +896,14 @@ public class Serial : IAsyncDisposable
 
     /// <summary>Downloads the custom OSD glyph ROM (4096 bytes).</summary>
     /// <remarks>The device closes this session with "get done", not "font done".</remarks>
-    public async Task<byte[]> GetFontAsync(CancellationToken token = default, bool quiet = false)
+    public async Task<byte[]> GetFontAsync(bool quiet = false, CancellationToken token = default)
         => await RunSessionAsync("font", "font", "get done", async ready => await ReceiveAsync(ParseNonce(ready), token), token, quiet: quiet);
 
     /// <summary>
     /// Mirrors the on-screen OSD grid. Returns the text and color planes plus the ready line's
     /// fields (rows/stride/width/cells for the main plane, rows/cols/on/osk for the aux plane).
     /// </summary>
-    public async Task<(byte[] Text, byte[] Color, Dictionary<string, string> Info)> GetOsdAsync(bool aux = false, CancellationToken token = default, bool quiet = false)
+    public async Task<(byte[] Text, byte[] Color, Dictionary<string, string> Info)> GetOsdAsync(bool aux = false, bool quiet = false, CancellationToken token = default)
     {
         string verb = aux ? "osd2" : "osd";
 
@@ -963,7 +967,7 @@ public class Serial : IAsyncDisposable
     /// Uploads a file to the RT4K's SD card. The device writes to a temp file and atomically
     /// renames it once the declared size and SHA-256 both check out.
     /// </summary>
-    public async Task PutFileAsync(string path, byte[] data, CancellationToken token = default, bool quiet = false)
+    public async Task PutFileAsync(string path, byte[] data, bool quiet = false, CancellationToken token = default)
     {
         string sha = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
         string command = $"put {data.Length} {sha} {path}";
@@ -1038,7 +1042,7 @@ public class Serial : IAsyncDisposable
                 echoMuted = !print;
             }
 
-            var replies = await SendCommandCoreAsync(command, line => line.StartsWith($"{verb} ready") || line.StartsWith($"{verb}:") || line.StartsWith($"{verb} err"), 2000, token, null);
+            var replies = await SendCommandCoreAsync(command, line => line.StartsWith($"{verb} ready") || line.StartsWith($"{verb}:") || line.StartsWith($"{verb} err"), 2000, null, token);
             string ready = replies.LastOrDefault() ?? throw new SerialException($"{verb}: no response from the {RT4K.DisplayName}");
 
             if (!ready.StartsWith($"{verb} ready"))

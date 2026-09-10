@@ -38,7 +38,7 @@ public partial class FirmwareJsonContext : JsonSerializerContext
 {
 }
 
-internal static class FirmwarePersistence
+internal static partial class FirmwarePersistence
 {
     public static void Save(string directory, FirmwareJournal journal)
     {
@@ -61,11 +61,16 @@ internal static class FirmwarePersistence
         // O_RDONLY is portable; O_DIRECTORY has different values on x64 and ARM64.
         int fd = Open(directory, 0);
         if (fd < 0) { throw SyncError("open", directory); }
+        IOException? error = null;
         try
         {
-            if (Fsync(fd) != 0) { throw SyncError("sync", directory); }
+            if (Fsync(fd) != 0) { error = SyncError("sync", directory); }
         }
-        finally { Close(fd); }
+        finally
+        {
+            if (Close(fd) != 0) { error ??= SyncError("close", directory); }
+        }
+        if (error != null) { throw error; }
     }
 
     private static IOException SyncError(string operation, string directory)
@@ -74,10 +79,10 @@ internal static class FirmwarePersistence
         return new IOException($"Could not {operation} firmware journal directory '{directory}' (OS error {error}: {new System.ComponentModel.Win32Exception(error).Message}).");
     }
 
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int Open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
-    [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
-    private static extern int Fsync(int fd);
-    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static extern int Close(int fd);
+    [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Open(string path, int flags);
+    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    private static partial int Fsync(int fd);
+    [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
+    private static partial int Close(int fd);
 }

@@ -82,7 +82,11 @@ public class Ser2net(Serial serial, int Port) : IAsyncDisposable
         }
     }
 
-    public ValueTask DisposeAsync() => new(StopAsync());
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+        GC.SuppressFinalize(this);
+    }
 
     private async Task AcceptClientsAsync(TcpListener server, CancellationTokenSource lifetime)
     {

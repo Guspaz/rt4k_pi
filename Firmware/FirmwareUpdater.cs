@@ -39,7 +39,7 @@ public sealed class FirmwareUpdater
     private string? lastCleanupError;
     private bool active;
     private bool stopping;
-    private bool corrupt;
+    private readonly bool corrupt;
     private long bytes;
     private long? total;
     private long connection;
@@ -178,7 +178,7 @@ public sealed class FirmwareUpdater
             bytes = 0;
             total = null;
             journal = journal with { Phase = "Cleaning", Message = "Checking the interrupted update. Please wait." };
-            return worker = Task.Run(() => CleanInterruptedCoreAsync(cancellation.Token));
+            return worker = Task.Run(() => CleanInterruptedCoreAsync(cancellation.Token), CancellationToken.None);
         }
     }
 

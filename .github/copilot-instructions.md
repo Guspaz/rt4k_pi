@@ -2,6 +2,7 @@
 
 ## Project Guidelines
 - For rt4k_pi, preserve ANSI colors in journalctl output. Do not disable console color formatting solely because stdout is redirected.
+- In rt4k_pi, suppress IDE0130 repository-wide: responsibility folders intentionally do not dictate namespaces.
 - For rt4k_pi's web UI, favor simple, nontechnical instructions and collapsible warnings; avoid confusing manual recovery controls.
 - For RT4K firmware updates, leverage the device's built-in verified atomic put and fwup validation. Use streaming put and report bytes sent without requiring per-frame acknowledgments. Do not issue sha256 serial commands or add duplicate copy-and-move staging; do not clean up partial transfers because the device owns its transfer temporary files. Interrupted operations should be canceled and cleaned up automatically, never resumed. Do not expose a manual recovery/resume action; preserve safety checks before deleting staged or boot files.
 

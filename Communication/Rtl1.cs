@@ -92,7 +92,7 @@ public static class Rtl1
         return frame;
     }
 
-    public static byte[] Encode(ushort nonce, Rtl1Type type, byte seq) => Encode(nonce, type, seq, ReadOnlySpan<byte>.Empty);
+    public static byte[] Encode(ushort nonce, Rtl1Type type, byte seq) => Encode(nonce, type, seq, []);
 }
 
 // Byte-fed, resync-safe RTL1 decoder. Bytes that aren't part of a valid looking

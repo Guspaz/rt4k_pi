@@ -259,7 +259,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
 
         try
         {
-            font ??= await serial.GetFontAsync(token, quiet: true);
+            font ??= await serial.GetFontAsync(quiet: true, token: token);
 
             var (primaryFailed, primary) = await CapturePlaneAsync(aux: false, token);
             var (secondaryFailed, secondary) = await CapturePlaneAsync(aux: true, token);
@@ -326,7 +326,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
                 return (false, null);
             }
 
-            var (text, color, info) = await serial.GetOsdAsync(aux, token, quiet: true);
+            var (text, color, info) = await serial.GetOsdAsync(aux, quiet: true, token: token);
 
             int rows = Field(info, "rows", aux ? 4 : 32);
             int stride = Field(info, "stride", OsdRenderer.Stride);
@@ -482,11 +482,8 @@ public class OsdMirror(Serial serial, RT4K rt4k)
         try
         {
             var lines = await serial.SendCommandAsync("banner", line => line.StartsWith("banner="), token: token, echoIf: _ => Program.Settings.VerboseLogging);
-            string? line = lines.FirstOrDefault(l => l.StartsWith("banner="));
-            if (line == null)
-            {
-                throw new SerialException("No banner state returned by the device.");
-            }
+            string line = lines.FirstOrDefault(l => l.StartsWith("banner="))
+                ?? throw new SerialException("No banner state returned by the device.");
 
             string path = ResolveBannerPath(line);
             if (path == bannerPath && banner != null)

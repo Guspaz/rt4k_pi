@@ -9,17 +9,15 @@ using System.Text.RegularExpressions;
 public record FirmwareRelease(string Id, string Version, string Date, bool Experimental, string Download, string Sha256, string Changelog);
 public record FirmwareImage(ZipArchiveEntry Entry, string Name, string Sha256);
 
-public sealed class FirmwareCatalog
+public sealed class FirmwareCatalog(HttpClient http)
 {
     public const long MaxDownloadBytes = 64 * 1024 * 1024;
     public const long MaxImageBytes = 16 * 1024 * 1024;
     public const string Site = "https://retrotink-llc.github.io/firmware/";
-    private readonly HttpClient http;
+    private readonly HttpClient http = http;
     private readonly SemaphoreSlim gate = new(1, 1);
     private FirmwareRelease[]? cached;
     private DateTime fetched;
-
-    public FirmwareCatalog(HttpClient http) => this.http = http;
 
     public async Task<FirmwareRelease[]> GetAsync(CancellationToken token)
     {
@@ -37,7 +35,7 @@ public sealed class FirmwareCatalog
                 await CopyBoundedAsync(input, output, 2 * 1024 * 1024, null, token);
                 releases.AddRange(Parse(Encoding.UTF8.GetString(output.ToArray()), experimental));
             }
-            cached = releases.OrderByDescending(r => Version.Parse(r.Version)).ThenBy(r => r.Experimental).ToArray();
+            cached = [.. releases.OrderByDescending(r => Version.Parse(r.Version)).ThenBy(r => r.Experimental)];
             fetched = DateTime.UtcNow;
             return cached;
         }
@@ -69,7 +67,7 @@ public sealed class FirmwareCatalog
             result.Add(new((experimental ? "experimental-" : "release-") + version, version, section.Groups["date"].Value, experimental, url, hashes[0].Groups["hash"].Value.ToLowerInvariant(), text));
         }
         if (result.Count == 0 || result.Select(r => r.Id).Distinct().Count() != result.Count) { throw new InvalidDataException("The official firmware listing is empty or ambiguous."); }
-        return result.ToArray();
+        return [.. result];
     }
 
     public static void ValidateDownload(string url)
@@ -139,7 +137,7 @@ public sealed class FirmwareCatalog
             string imageVersion = Encoding.ASCII.GetString(header, 64, 64).TrimEnd('\0');
             if (imageVersion != version) { throw new InvalidDataException("The update binary version does not match the selected release."); }
         }
-        return images.ToArray();
+        return [.. images];
     }
 
     private static async Task CopyBoundedAsync(Stream input, Stream output, long limit, Action<long>? progress, CancellationToken token)
