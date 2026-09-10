@@ -9,22 +9,36 @@ using System.Text.RegularExpressions;
 public record FirmwareRelease(string Id, string Version, string Date, bool Experimental, string Download, string Sha256, string Changelog);
 public record FirmwareImage(ZipArchiveEntry Entry, string Name, string Sha256);
 
-public sealed class FirmwareCatalog(HttpClient http)
+public sealed class FirmwareCatalog(HttpClient http, TimeProvider? time = null)
 {
     public const long MaxDownloadBytes = 64 * 1024 * 1024;
     public const long MaxImageBytes = 16 * 1024 * 1024;
     public const string Site = "https://retrotink-llc.github.io/firmware/";
     private readonly HttpClient http = http;
+    private readonly TimeProvider time = time ?? TimeProvider.System;
+    public static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(15);
     private readonly SemaphoreSlim gate = new(1, 1);
-    private FirmwareRelease[]? cached;
-    private DateTime fetched;
+    private sealed record Snapshot(FirmwareRelease[] Releases, DateTimeOffset Fetched);
+    private Snapshot? cached;
+
+    public FirmwareRelease? FindUpdate(string? currentVersion, bool includeExperimental)
+    {
+        Snapshot? snapshot = Volatile.Read(ref cached);
+        if (snapshot == null || time.GetUtcNow() - snapshot.Fetched >= CacheLifetime ||
+            !Version.TryParse(currentVersion, out var current)) { return null; }
+        if (current.Build < 0) { current = new Version(current.Major, current.Minor, 0); }
+        return snapshot.Releases.FirstOrDefault(release =>
+            (includeExperimental || !release.Experimental) && FirmwareUpdater.IsSupportedVersion(release.Version) &&
+            Version.Parse(release.Version) > current);
+    }
 
     public async Task<FirmwareRelease[]> GetAsync(CancellationToken token)
     {
         await gate.WaitAsync(token);
         try
         {
-            if (cached != null && DateTime.UtcNow - fetched < TimeSpan.FromMinutes(15)) { return cached; }
+            Snapshot? snapshot = Volatile.Read(ref cached);
+            if (snapshot != null && time.GetUtcNow() - snapshot.Fetched < CacheLifetime) { return snapshot.Releases; }
             var releases = new List<FirmwareRelease>();
             foreach (bool experimental in new[] { false, true })
             {
@@ -35,9 +49,9 @@ public sealed class FirmwareCatalog(HttpClient http)
                 await CopyBoundedAsync(input, output, 2 * 1024 * 1024, null, token);
                 releases.AddRange(Parse(Encoding.UTF8.GetString(output.ToArray()), experimental));
             }
-            cached = [.. releases.OrderByDescending(r => Version.Parse(r.Version)).ThenBy(r => r.Experimental)];
-            fetched = DateTime.UtcNow;
-            return cached;
+            FirmwareRelease[] sorted = [.. releases.OrderByDescending(r => Version.Parse(r.Version)).ThenBy(r => r.Experimental)];
+            Volatile.Write(ref cached, new Snapshot(sorted, time.GetUtcNow()));
+            return sorted;
         }
         finally { gate.Release(); }
     }

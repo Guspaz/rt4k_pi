@@ -80,6 +80,138 @@ await Test("Release API serializes the centrally defined minimum version", () =>
     return Task.CompletedTask;
 });
 
+await Test("Experimental firmware defaults on and the saved preference round-trips", () =>
+{
+    Check(new SettingsData().IncludeExperimentalFirmware, "New settings disabled experimental firmware.");
+    Check(JsonSerializer.Deserialize<SettingsData>("{}")!.IncludeExperimentalFirmware, "Old settings lost the enabled default.");
+    var saved = JsonSerializer.Serialize(new SettingsData { IncludeExperimentalFirmware = false });
+    Check(!JsonSerializer.Deserialize<SettingsData>(saved)!.IncludeExperimentalFirmware, "Disabled preference was not preserved.");
+    var settings = new SettingsDaemon();
+    settings.UpdateSetting(nameof(SettingsDaemon.IncludeExperimentalFirmware), "false");
+    Check(!settings.IncludeExperimentalFirmware, "Setting endpoint did not apply preference.");
+    using var listing = JsonDocument.Parse(JsonSerializer.Serialize(new FirmwareListing([], false), FirmwareJsonContext.Default.FirmwareListing));
+    Check(!listing.RootElement.GetProperty("includeExperimental").GetBoolean(), "Listing omitted preference.");
+    return Task.CompletedTask;
+});
+
+await Test("Cached update checks respect preference, numeric versions, expiry and failed refreshes", async () =>
+{
+    var time = new CatalogTime();
+    int requests = 0;
+    bool fail = false;
+    using var http = new HttpClient(new Handler((request, _) =>
+    {
+        requests++;
+        if (fail) { throw new HttpRequestException("Offline"); }
+        string html = request.RequestUri!.AbsolutePath.EndsWith("4k.html")
+            ? Data.Html("1.76.0") + Data.Html("1.9.6") : Data.Html("1.100.0");
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) });
+    }));
+    var catalog = new FirmwareCatalog(http, time);
+    Check(catalog.FindUpdate("1.75.0", true) == null && requests == 0, "Cold read performed network IO.");
+    await catalog.GetAsync(CancellationToken.None);
+    Check(catalog.FindUpdate("1.75.0", true)?.Version == "1.100.0", "Numeric experimental latest incorrect.");
+    Check(catalog.FindUpdate("1.75.0", false)?.Version == "1.76.0", "Stable preference ignored.");
+    Check(catalog.FindUpdate("1.76.0", false) == null, "Equal stable version notified.");
+    Check(catalog.FindUpdate("1.100", true) == null, "Two-component version compared incorrectly.");
+    Check(catalog.FindUpdate("2.0.0", true) == null, "Newer installed version notified.");
+    Check(catalog.FindUpdate(null, true) == null && catalog.FindUpdate("invalid", true) == null, "Unknown version notified.");
+    time.Now += FirmwareCatalog.CacheLifetime - TimeSpan.FromSeconds(1);
+    await catalog.GetAsync(CancellationToken.None);
+    Check(requests == 2, "Fresh cache unnecessarily refreshed.");
+    time.Now += TimeSpan.FromSeconds(1);
+    Check(catalog.FindUpdate("1.75.0", true) == null, "Expired cache advertised an update.");
+    fail = true;
+    await Reject<HttpRequestException>(() => catalog.GetAsync(CancellationToken.None));
+    Check(catalog.FindUpdate("1.75.0", true) == null, "Failed refresh made stale data fresh.");
+    fail = false;
+    await catalog.GetAsync(CancellationToken.None);
+    Check(catalog.FindUpdate("1.75.0", false)?.Version == "1.76.0", "Retry did not recover.");
+});
+
+await Test("Background refresh and concurrent catalog requests never block snapshot reads", async () =>
+{
+    var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    int requests = 0;
+    using var http = new HttpClient(new Handler(async (_, token) =>
+    {
+        Interlocked.Increment(ref requests);
+        entered.TrySetResult();
+        await release.Task.WaitAsync(token);
+        return new(HttpStatusCode.OK) { Content = new StringContent(Data.Html()) };
+    }));
+    var catalog = new FirmwareCatalog(http);
+    using var refresh = new FirmwareCatalogRefresh(catalog);
+    await refresh.StartAsync(CancellationToken.None);
+    await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    try
+    {
+        Task<FirmwareRelease[]> first = catalog.GetAsync(CancellationToken.None);
+        Task<FirmwareRelease[]> second = catalog.GetAsync(CancellationToken.None);
+        Check(catalog.FindUpdate("1.75.0", true) == null, "Cold cache unexpectedly returned a release.");
+        Check(!first.IsCompleted && !second.IsCompleted, "Blocked HTTP request unexpectedly completed.");
+        release.SetResult();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        Check(requests == 2, "Concurrent refreshes duplicated listing requests.");
+        Check(catalog.FindUpdate("1.75.0", true)?.Version == Data.Version, "Background refresh did not publish results.");
+    }
+    finally
+    {
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await refresh.StopAsync(stop.Token);
+    }
+});
+
+await Test("Status firmware link follows cached releases, settings and live device state", async () =>
+{
+    using var http = new HttpClient(new Handler((request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+    {
+        Content = new StringContent(Data.Html(request.RequestUri!.AbsolutePath.EndsWith("4k.html") ? "1.75.0" : "1.77.0"))
+    })));
+    var catalog = new FirmwareCatalog(http);
+    await using var serial = new Serial(2000000);
+    using var wire = new MemoryStream();
+    var port = typeof(Serial).GetField("port", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    port.SetValue(serial, wire);
+    var device = new RT4K(serial);
+    var power = typeof(RT4K).GetProperty(nameof(RT4K.Power))!;
+    var status = typeof(RT4K).GetProperty(nameof(RT4K.Status))!;
+    power.SetValue(device, RT4K.PowerState.On);
+    status.SetValue(device, new Dictionary<string, string> { ["fw"] = "1.75.0", ["model"] = "1" });
+    var settings = new SettingsDaemon();
+    var state = new rt4k_pi.Slices.AppState
+    {
+        Serial = serial, RT4K = device, FirmwareCatalog = catalog, Settings = settings,
+        Logger = null!, StatusDaemon = null!, Installer = null!
+    };
+    async Task<string> Render()
+    {
+        using var writer = new StringWriter();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await rt4k_pi.Slices.RT4KStatusRows.Create(state).RenderAsync(writer, cancellationToken: timeout.Token);
+        return writer.ToString();
+    }
+    Check(!(await Render()).Contains("Update available"), "Cold status render showed update.");
+    await catalog.GetAsync(CancellationToken.None);
+    string rows = await Render();
+    Check(rows.Contains("href=\"/Firmware\"") && rows.Contains("Update available") && rows.Contains("1.77.0"), "Status omitted cached firmware link.");
+    settings.IncludeExperimentalFirmware = false;
+    Check(!(await Render()).Contains("Update available"), "Preference change left experimental notice visible.");
+    settings.IncludeExperimentalFirmware = true;
+    status.SetValue(device, new Dictionary<string, string> { ["fw"] = "1.77.0", ["model"] = "1" });
+    Check(!(await Render()).Contains("Update available"), "Installed target still advertised update.");
+    status.SetValue(device, new Dictionary<string, string> { ["fw"] = "1.75.0", ["model"] = "2" });
+    Check(!(await Render()).Contains("Update available"), "Unsupported model advertised update.");
+    status.SetValue(device, new Dictionary<string, string> { ["fw"] = "1.75.0", ["model"] = "1" });
+    port.SetValue(serial, null);
+    Check(!(await Render()).Contains("Update available"), "Disconnected device advertised update.");
+    port.SetValue(serial, wire);
+    power.SetValue(device, RT4K.PowerState.Unknown);
+    Check(!(await Render()).Contains("Update available"), "Unknown power advertised update.");
+    await device.StopAsync();
+});
+
 await Test("Catalog parses changelog as text and rejects missing integrity metadata", async () =>
 {
     var releases = FirmwareCatalog.Parse(Data.Html(), true);

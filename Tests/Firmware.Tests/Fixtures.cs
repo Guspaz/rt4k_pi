@@ -54,6 +54,12 @@ internal sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<H
     }
 }
 
+internal sealed class CatalogTime : TimeProvider
+{
+    public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
+    public override DateTimeOffset GetUtcNow() => Now;
+}
+
 internal sealed class FastTime : TimeProvider
 {
     public override long GetTimestamp() => Stopwatch.GetTimestamp() * 200;

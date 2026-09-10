@@ -11,6 +11,7 @@ public sealed record SettingsData
     public bool VerboseLogging { get; set; }
     public bool WakeOnFileAccess { get; set; } = true;
     public bool EnableSer2net { get; set; } = true;
+    public bool IncludeExperimentalFirmware { get; set; } = true;
 
     public void Validate()
     {

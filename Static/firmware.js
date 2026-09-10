@@ -3,6 +3,7 @@
     const element = id => document.getElementById(id);
     const buttonClasses = element("installLatest").className;
     let releases = [];
+    let includeExperimental = true;
     let minimumSupportedVersion = null;
     let visibleCount = 8;
     let view = null;
@@ -37,7 +38,7 @@
     }
 
     function filtered() {
-        return releases.filter(release => element("includeExperimental").checked || !release.experimental);
+        return releases.filter(release => includeExperimental || !release.experimental);
     }
 
     function currentRelease() {
@@ -109,7 +110,7 @@
             button.className = buttonClasses;
             button.dataset.firmwareId = release.id;
             button.textContent = actionLabel(release);
-            button.hidden = release.experimental && !element("includeExperimental").checked;
+            button.hidden = release.experimental && !includeExperimental;
             button.addEventListener("click", () => start(release));
             actions.append(button);
             section.append(title, notes, actions);
@@ -126,11 +127,12 @@
         updateControls();
         error("firmwareCatalogError", null);
         try {
-            const data = await (await request("/Firmware/releases?experimental=true")).json();
+            const data = await (await request("/Firmware/releases")).json();
             if (typeof data.minimumSupportedVersion !== "string" || !/^\d+\.\d+(?:\.\d+){0,2}$/.test(data.minimumSupportedVersion)) {
                 throw new Error("Firmware compatibility information is unavailable. Refresh the page before installing firmware.");
             }
             minimumSupportedVersion = data.minimumSupportedVersion;
+            includeExperimental = data.includeExperimental !== false;
             releases = data.releases;
             catalogReady = true;
         } catch (failure) {
@@ -208,12 +210,11 @@
     }
 
     async function start(release) {
-        if (pendingAction || !statusKnown || !isSupported(release) || view?.progress.active || view?.progress.needsRecovery) { return; }
+        if (pendingAction || !statusKnown || !isSupported(release) || (release.experimental && !includeExperimental) || view?.progress.active || view?.progress.needsRecovery) { return; }
         if (!confirm(`${actionLabel(release)}${release.experimental ? " (experimental)" : ""}?\n\nKeep the Pi and RT4K powered on. You can cancel while files are downloading or being sent, but not once installation starts.`)) { return; }
         await mutate(`/Firmware/start?id=${encodeURIComponent(release.id)}&confirmed=true`);
     }
 
-    element("includeExperimental").addEventListener("change", () => { visibleCount = 8; renderVersions(); });
     element("refreshFirmware").addEventListener("click", loadReleases);
     element("moreFirmware").addEventListener("click", () => { visibleCount += 8; renderVersions(); });
     element("installLatest").addEventListener("click", () => { const latest = filtered()[0]; if (latest) { start(latest); } });

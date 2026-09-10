@@ -56,6 +56,12 @@ public class SettingsDaemon
         set => Update(settings => settings with { EnableSer2net = value });
     }
 
+    public bool IncludeExperimentalFirmware
+    {
+        get => Current.IncludeExperimentalFirmware;
+        set => Update(settings => settings with { IncludeExperimentalFirmware = value });
+    }
+
     private void Update(Func<SettingsData, SettingsData> change)
     {
         lock (gate)
@@ -156,6 +162,7 @@ public class SettingsDaemon
                 case nameof(VerboseLogging): VerboseLogging = bool.Parse(value); break;
                 case nameof(WakeOnFileAccess): WakeOnFileAccess = bool.Parse(value); break;
                 case nameof(EnableSer2net): EnableSer2net = bool.Parse(value); break;
+                case nameof(IncludeExperimentalFirmware): IncludeExperimentalFirmware = bool.Parse(value); break;
                 default: return Results.BadRequest("Unknown setting.");
             }
         }

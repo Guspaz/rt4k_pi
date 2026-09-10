@@ -42,9 +42,11 @@ If the application will not start after an update, you can restore the previous 
 An RT4K Pro or CE must be powered on with an SD card inserted. Firmware **1.75.0 or newer** is required. If your device runs an older version, use RetroTINK's official SD-card update instructions first. Installing versions below this minimum is not supported.
 
 1. Finish any file copies to the RT4K, then open **Firmware** in the web UI.
-2. Choose whether to include experimental releases; they are included by default. Select a version to read its changelog, or show older releases to choose an earlier supported version.
+2. Experimental releases are included by default; you can change this in **Settings**. Select a version to read its changelog, or show older releases to choose an earlier supported version.
 3. Select the version to install and confirm. The Pi downloads the firmware and sends the files for your RT4K model automatically.
 4. Wait for the page to report that the update is complete. Status refreshes automatically, and you can leave the page and return without stopping the update.
+
+The **Status** page shows an **Update available** link beside the scaler's firmware version when a newer release is found. Checks happen automatically in the background and follow your experimental firmware setting.
 
 **Keep both the Pi and RT4K powered throughout the update. Unplugging the Pi can also turn off the RT4K. Losing power during installation can leave the RT4K unable to start.**
 

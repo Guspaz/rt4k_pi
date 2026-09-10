@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 
 public record FirmwareProgress(string Phase, string Message, string? Version, bool Active, bool CanCancel, bool NeedsRecovery, long Bytes, long? TotalBytes);
 public record FirmwareView(FirmwareProgress Progress, string? CurrentVersion, string? Model, bool Connected);
-public record FirmwareListing(FirmwareRelease[] Releases)
+public record FirmwareListing(FirmwareRelease[] Releases, bool IncludeExperimental = true)
 {
     public string MinimumSupportedVersion => FirmwareUpdater.MinimumSupportedVersion.ToString();
 }

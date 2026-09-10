@@ -27,7 +27,7 @@ class Element {
     fire(name) { if (!this.disabled) { return this.handlers[name]?.(); } }
 }
 
-async function page(minimumSupportedVersion = "1.75.0", storage = new Map()) {
+async function page(minimumSupportedVersion = "1.75.0", storage = new Map(), includeExperimental = true) {
     const elements = new Map([...markup.matchAll(/id="([^"]+)"/g)].map(match => [match[1], new Element()]));
     const created = [];
     const timers = [];
@@ -36,9 +36,9 @@ async function page(minimumSupportedVersion = "1.75.0", storage = new Map()) {
     const state = {
         offline: false,
         startError: null,
+        includeExperimental,
         view: { connected: true, currentVersion: "1.75.0", model: "RT4K CE", progress: { phase: "Idle", message: "Ready.", active: false, canCancel: false, needsRecovery: false, bytes: 0, totalBytes: null } }
     };
-    elements.get("includeExperimental").checked = true;
     const releases = [
         { id: "experimental-1.77.0", version: "1.77.0", experimental: true, date: "2026-08-28", changelog: "<img src=x onerror=bad()>" },
         { id: "experimental-1.75.0", version: "1.75.0", experimental: true, date: "2026-08-16", changelog: "Current notes" },
@@ -58,7 +58,7 @@ async function page(minimumSupportedVersion = "1.75.0", storage = new Map()) {
         fetch: async (url, options) => {
             requests.push({ url, options });
             let data;
-            if (url.startsWith("/Firmware/releases")) { data = { releases, minimumSupportedVersion }; }
+            if (url.startsWith("/Firmware/releases")) { data = { releases, minimumSupportedVersion, includeExperimental: state.includeExperimental }; }
             else if (url === "/Firmware/status") {
                 if (state.offline) { throw new Error("Network disconnected"); }
                 data = structuredClone(state.view);
@@ -79,18 +79,30 @@ async function page(minimumSupportedVersion = "1.75.0", storage = new Map()) {
 }
 
 test("default experimental latest, version anchors, changelog text and stable filtering", async () => {
-    const { elements } = await page();
-    assert.equal(elements.get("includeExperimental").checked, true);
+    const { elements, state } = await page();
+    assert.equal(elements.has("includeExperimental"), false);
     assert.match(elements.get("latestFirmware").children[0].textContent, /1\.77\.0/);
     assert.equal(elements.get("currentFirmware").children[0].href, "#firmware-experimental-1.75.0");
     assert.equal(elements.get("firmwareReleases").children[0].children[1].textContent, "<img src=x onerror=bad()>");
-    elements.get("includeExperimental").checked = false;
-    elements.get("includeExperimental").fire("change");
+    state.includeExperimental = false;
+    await elements.get("refreshFirmware").fire("click");
     assert.match(elements.get("latestFirmware").children[0].textContent, /1\.9\.6/);
     assert.match(elements.get("installLatest").textContent, /Unavailable.*1\.75\.0/);
     assert.equal(elements.get("installLatest").disabled, true);
     assert.equal(elements.get("firmwareReleases").children.length, 2, "Current experimental notes should remain linkable when filtered out");
     assert.equal(elements.get("firmwareReleases").children[1].children[2].children[0].hidden, true, "Filtered experimental reinstall action must be hidden");
+});
+
+test("saved stable preference applies on first load and checkbox lives in Settings", async () => {
+    const settings = fs.readFileSync(path.resolve(__dirname, "../../Slices/Settings.cshtml"), "utf8");
+    assert.match(settings, /id="IncludeExperimentalFirmware"[^>]*onchange="sendCheckboxState\(this\)"/);
+    assert.match(markup, /href="\/Settings"/);
+    const p = await page("1.75.0", new Map(), false);
+    assert.match(p.elements.get("latestFirmware").children[0].textContent, /1\.9\.6/);
+    assert.ok(p.requests.some(request => request.url === "/Firmware/releases"));
+    const hidden = p.elements.get("firmwareReleases").children[1].children[2].children[0];
+    await hidden.handlers.click();
+    assert.equal(p.confirmations.length, 0);
 });
 
 test("older history targets cannot install even if their disabled click handler is invoked", async () => {

@@ -17,14 +17,12 @@ public partial class Program
 
     private static void MapFirmware(WebApplication app)
     {
-        var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) };
-        var catalog = new FirmwareCatalog(http);
+        var catalog = app.Services.GetRequiredService<FirmwareCatalog>();
         var updater = new FirmwareUpdater(new SerialFirmwareDevice(Serial!), catalog, Path.Combine(AppContext.BaseDirectory, "firmware-update"));
         Firmware = updater;
         updater.StartCleanupMonitor();
-        app.Lifetime.ApplicationStopped.Register(http.Dispose);
 
-        app.MapGet("/Firmware/releases", async (HttpContext context, [FromQuery] bool? experimental, CancellationToken token) =>
+        app.MapGet("/Firmware/releases", async (HttpContext context, CancellationToken token) =>
         {
             context.Response.Headers.CacheControl = "no-store";
             try
@@ -32,7 +30,7 @@ public partial class Program
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(45));
                 var releases = await catalog.GetAsync(timeout.Token);
-                return Results.Json(new FirmwareListing([.. releases.Where(r => experimental != false || !r.Experimental)]), FirmwareJsonContext.Default.FirmwareListing);
+                return Results.Json(new FirmwareListing(releases, Settings.IncludeExperimentalFirmware), FirmwareJsonContext.Default.FirmwareListing);
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or OperationCanceledException)
             {

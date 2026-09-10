@@ -28,6 +28,10 @@ public partial class Program
             options.ColorBehavior = Microsoft.Extensions.Logging.Console.LoggerColorBehavior.Disabled;
         });
 
+        builder.Services.AddSingleton(_ => new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) });
+        builder.Services.AddSingleton(provider => new FirmwareCatalog(provider.GetRequiredService<HttpClient>()));
+        builder.Services.AddHostedService<FirmwareCatalogRefresh>();
+
         var app = builder.Build();
 
         var embeddedProvider = new EmbeddedFileProvider(Assembly.GetExecutingAssembly(), "rt4k_pi");
@@ -50,7 +54,8 @@ public partial class Program
             FuseDaemon = FuseDaemon,
             Settings = Settings,
             Installer = Installer,
-            RT4K = RT4K
+            RT4K = RT4K,
+            FirmwareCatalog = app.Services.GetRequiredService<FirmwareCatalog>()
         };
 
         var assembly = Assembly.GetExecutingAssembly();
@@ -257,9 +262,9 @@ public partial class Program
 
             CancellationToken token = context.RequestAborted;
 
-            // The page was served with the current rows already in place, so the first push is
-            // only worth making once something has moved on from that.
-            long sent = RT4K.Revision;
+            // Send an initial snapshot in case the device or catalog changed since page render.
+            long sent = -1;
+            FirmwareRelease? sentUpdate = null;
 
             try
             {
@@ -268,10 +273,12 @@ public partial class Program
                     // Read the revision first so a poll landing between these two lines re-sends
                     // the same rows next pass rather than recording one that was never sent.
                     long revision = RT4K.Revision;
+                    FirmwareRelease? update = appState.AvailableFirmwareUpdate;
 
-                    if (revision != sent)
+                    if (revision != sent || update != sentUpdate)
                     {
                         sent = revision;
+                        sentUpdate = update;
 
                         var writer = new StringWriter();
                         await Slices.RT4KStatusRows.Create(appState).RenderAsync(writer, cancellationToken: token);

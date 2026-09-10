@@ -97,6 +97,7 @@
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
         <tr><th style="width: 25%;">Verbose logging</th><td><input class="w3-check" id="VerboseLogging" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.VerboseLogging ? "checked" : "") /> <label for="VerboseLogging">Enable</label></td></tr>
         <tr><th style="width: 25%;">Wake on file access</th><td><input class="w3-check" id="WakeOnFileAccess" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.WakeOnFileAccess ? "checked" : "") /> <label for="WakeOnFileAccess">Power on the @Model.Settings.ModelName when its SD card is accessed over SMB</label></td></tr>
+        <tr><th style="width: 25%;">Allow experimental firmware</th><td><input class="w3-check" id="IncludeExperimentalFirmware" type="checkbox" onchange="sendCheckboxState(this)" @(Model.Settings.IncludeExperimentalFirmware ? "checked" : "") /> <label for="IncludeExperimentalFirmware">Show experimental (AKA beta) firmware updates</label></td></tr>
     </table>
 </div>
 

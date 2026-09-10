@@ -26,7 +26,12 @@
 
 	@if (rt4k.Firmware != null)
 	{
-		<tr><th>Firmware</th><td>@rt4k.Firmware@(rt4k.BuildTag != null ? $" ({rt4k.BuildTag})" : "")</td></tr>
+		<tr><th>Firmware</th><td>@rt4k.Firmware@(rt4k.BuildTag != null ? $" ({rt4k.BuildTag})" : "")
+			@if (Model.AvailableFirmwareUpdate is { } update)
+			{
+				<a href="/Firmware" class="w3-small w3-tag w3-blue w3-round" title="Firmware @(update.Version)@(update.Experimental ? " (experimental)" : "") is available">Update available</a>
+			}
+		</td></tr>
 	}
 
 	@if (rt4k.Input != null)
