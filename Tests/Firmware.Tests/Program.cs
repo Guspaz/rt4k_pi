@@ -243,6 +243,61 @@ await Test("Catalog sorts semantic versions and caches official listings", async
     Check(releases[0].Version == "1.77.0" && releases[^1].Version == "1.9.6" && requests == 2, "Semantic ordering or cache failed.");
 });
 
+await Test("Forced catalog refresh discovers new releases and replaces the cache", async () =>
+{
+    var time = new CatalogTime();
+    int requests = 0;
+    string latest = "1.80.0";
+    using var http = new HttpClient(new Handler((request, _) =>
+    {
+        requests++;
+        string version = request.RequestUri!.AbsolutePath.EndsWith("4k.html") ? "1.9.6" : latest;
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Data.Html(version)) });
+    }));
+    var catalog = new FirmwareCatalog(http, time);
+    await catalog.GetAsync(CancellationToken.None);
+    latest = "1.80.1";
+    time.Now += TimeSpan.FromMinutes(1);
+    Check((await catalog.GetAsync(CancellationToken.None))[0].Version == "1.80.0" && requests == 2, "Normal read bypassed the fresh cache.");
+    var refreshed = await catalog.GetAsync(CancellationToken.None, forceRefresh: true);
+    Check(refreshed[0].Version == "1.80.1" && requests == 4, "Forced refresh did not fetch both official listings.");
+    Check(catalog.FindUpdate("1.80.0", true)?.Version == "1.80.1", "Update notification did not use the refreshed snapshot.");
+    time.Now += FirmwareCatalog.CacheLifetime - TimeSpan.FromSeconds(1);
+    Check((await catalog.GetAsync(CancellationToken.None)).SequenceEqual(refreshed) && requests == 4, "Refreshed cache was not retained for its full lifetime.");
+    time.Now += TimeSpan.FromSeconds(1);
+    await catalog.GetAsync(CancellationToken.None);
+    Check(requests == 6, "Refreshed cache did not expire normally.");
+});
+
+await Test("Failed forced catalog refresh preserves the prior snapshot without extending its lifetime", async () =>
+{
+    var time = new CatalogTime();
+    int requests = 0;
+    string failure = "";
+    using var http = new HttpClient(new Handler((request, _) =>
+    {
+        requests++;
+        bool stable = request.RequestUri!.AbsolutePath.EndsWith("4k.html");
+        if (!stable && failure == "offline") { throw new HttpRequestException("Offline"); }
+        string html = !stable && failure == "invalid" ? "Invalid listing" : Data.Html(failure.Length == 0 ? "1.80.0" : "1.80.1");
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) });
+    }));
+    var catalog = new FirmwareCatalog(http, time);
+    var original = await catalog.GetAsync(CancellationToken.None);
+    time.Now += TimeSpan.FromMinutes(1);
+    failure = "offline";
+    await Reject<HttpRequestException>(() => catalog.GetAsync(CancellationToken.None, forceRefresh: true));
+    Check((await catalog.GetAsync(CancellationToken.None)).SequenceEqual(original) && requests == 4, "Failed refresh replaced or invalidated the prior snapshot.");
+    failure = "invalid";
+    await Reject<InvalidDataException>(() => catalog.GetAsync(CancellationToken.None, forceRefresh: true));
+    Check((await catalog.GetAsync(CancellationToken.None)).SequenceEqual(original) && requests == 6, "Invalid refresh published a partial listing.");
+    time.Now += FirmwareCatalog.CacheLifetime - TimeSpan.FromMinutes(1);
+    Check(catalog.FindUpdate("1.75.0", true) == null, "Failed refresh extended the original cache lifetime.");
+    failure = "";
+    await catalog.GetAsync(CancellationToken.None);
+    Check(requests == 8, "Catalog could not refresh after failures.");
+});
+
 foreach (int model in new[] { 0, 1 })
 {
     await Test($"Archive selects only model {model} and the shared binary", async () =>

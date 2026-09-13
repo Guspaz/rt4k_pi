@@ -22,14 +22,14 @@ public partial class Program
         Firmware = updater;
         updater.StartCleanupMonitor();
 
-        app.MapGet("/Firmware/releases", async (HttpContext context, CancellationToken token) =>
+        app.MapGet("/Firmware/releases", async (HttpContext context, [FromQuery] bool? refresh, CancellationToken token) =>
         {
             context.Response.Headers.CacheControl = "no-store";
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(45));
-                var releases = await catalog.GetAsync(timeout.Token);
+                var releases = await catalog.GetAsync(timeout.Token, forceRefresh: refresh == true);
                 return Results.Json(new FirmwareListing(releases, Settings.IncludeExperimentalFirmware), FirmwareJsonContext.Default.FirmwareListing);
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or OperationCanceledException)

@@ -32,13 +32,13 @@ public sealed class FirmwareCatalog(HttpClient http, TimeProvider? time = null)
             Version.Parse(release.Version) > current);
     }
 
-    public async Task<FirmwareRelease[]> GetAsync(CancellationToken token)
+    public async Task<FirmwareRelease[]> GetAsync(CancellationToken token, bool forceRefresh = false)
     {
         await gate.WaitAsync(token);
         try
         {
             Snapshot? snapshot = Volatile.Read(ref cached);
-            if (snapshot != null && time.GetUtcNow() - snapshot.Fetched < CacheLifetime) { return snapshot.Releases; }
+            if (!forceRefresh && snapshot != null && time.GetUtcNow() - snapshot.Fetched < CacheLifetime) { return snapshot.Releases; }
             var releases = new List<FirmwareRelease>();
             foreach (bool experimental in new[] { false, true })
             {

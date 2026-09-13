@@ -120,14 +120,14 @@
         updateControls();
     }
 
-    async function loadReleases() {
+    async function loadReleases(forceRefresh = false) {
         element("refreshFirmware").disabled = true;
         catalogReady = false;
         minimumSupportedVersion = null;
         updateControls();
         error("firmwareCatalogError", null);
         try {
-            const data = await (await request("/Firmware/releases")).json();
+            const data = await (await request(forceRefresh ? "/Firmware/releases?refresh=true" : "/Firmware/releases")).json();
             if (typeof data.minimumSupportedVersion !== "string" || !/^\d+\.\d+(?:\.\d+){0,2}$/.test(data.minimumSupportedVersion)) {
                 throw new Error("Firmware compatibility information is unavailable. Refresh the page before installing firmware.");
             }
@@ -215,7 +215,7 @@
         await mutate(`/Firmware/start?id=${encodeURIComponent(release.id)}&confirmed=true`);
     }
 
-    element("refreshFirmware").addEventListener("click", loadReleases);
+    element("refreshFirmware").addEventListener("click", () => loadReleases(true));
     element("moreFirmware").addEventListener("click", () => { visibleCount += 8; renderVersions(); });
     element("installLatest").addEventListener("click", () => { const latest = filtered()[0]; if (latest) { start(latest); } });
     element("cancelFirmware").addEventListener("click", () => mutate("/Firmware/cancel"));
