@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Linux ARM64 Native AOT
+    # Keep glibc older than Raspberry Pi OS Bookworm (2.36).
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Native AOT prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends clang zlib1g-dev
+
+      - name: Publish Release executable
+        run: >-
+          dotnet publish rt4k_pi.csproj
+          --configuration Release
+          --runtime linux-arm64
+          --self-contained true
+          -p:PublishAot=true
+          --output "${{ runner.temp }}/rt4k_pi-publish"
+
+      - name: Validate and package executable
+        run: |
+          publish_dir="${{ runner.temp }}/rt4k_pi-publish"
+          test -x "$publish_dir/rt4k_pi"
+          readelf -h "$publish_dir/rt4k_pi" | grep -E 'Machine:.*AArch64'
+          if find "$publish_dir" -type f \( -name '*.dll' -o -name '*.so' -o -name '*.so.*' \) -print -quit | grep -q .; then
+            echo 'Unexpected managed or native sidecar library in single-binary publish output.' >&2
+            exit 1
+          fi
+          tar -czf "${{ runner.temp }}/rt4k_pi-linux-arm64.tar.gz" -C "$publish_dir" rt4k_pi
+
+      - name: Upload CI build
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: rt4k_pi-linux-arm64
+          path: ${{ runner.temp }}/rt4k_pi-linux-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

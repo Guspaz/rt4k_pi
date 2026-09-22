@@ -16,6 +16,17 @@ Incomplete installation instructions can be found at: https://github.com/Guspaz/
 
 The missing instructions are basically, use SSH/SCP to copy the rt4k_pi binary over to the /home/pi folder (assuming you used "pi" as the username) and run it, it will handle the rest of the install/config/setup itself.
 
+### CI builds
+
+Development builds are available for Raspberry Pi OS Lite **64-bit, Bookworm (Debian 12) or newer**. They contain a single executable and do not require installing .NET on the Pi. These are not stable releases.
+
+1. Sign in to GitHub and open this repository's **Actions** tab.
+2. Select **CI**, then a successful run for the branch or commit you want (normally `master`).
+3. Download the **rt4k_pi-linux-arm64** artifact and unzip it.
+4. Copy `rt4k_pi-linux-arm64.tar.gz` to the Pi and extract it with `tar -xzf rt4k_pi-linux-arm64.tar.gz` in a separate folder. The archive contains only `rt4k_pi`, with its executable permissions preserved. Follow the setup instructions above for a new installation.
+
+Artifacts are kept for 30 days. Downloading a CI build does not install it or enable automatic updates.
+
 ## Serial TCP service
 
 The optional serial TCP service lets other software send text commands to the RT4K on port 2000. It does not support file transfers or other binary commands. Commands must end with a newline and be no longer than 255 characters. Use the web UI or network share for file access instead.
