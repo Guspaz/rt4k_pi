@@ -48,7 +48,7 @@ jobs:
           -p:PublishAot=true
           --output "${{ runner.temp }}/rt4k_pi-publish"
 
-      - name: Validate and package executable
+      - name: Validate executable
         run: |
           publish_dir="${{ runner.temp }}/rt4k_pi-publish"
           test -x "$publish_dir/rt4k_pi"
@@ -57,13 +57,11 @@ jobs:
             echo 'Unexpected managed or native sidecar library in single-binary publish output.' >&2
             exit 1
           fi
-          tar -czf "${{ runner.temp }}/rt4k_pi-linux-arm64.tar.gz" -C "$publish_dir" rt4k_pi
 
       - name: Upload CI build
         uses: actions/upload-artifact@v7.0.1
         with:
           name: rt4k_pi-linux-arm64
-          path: ${{ runner.temp }}/rt4k_pi-linux-arm64.tar.gz
+          path: ${{ runner.temp }}/rt4k_pi-publish/rt4k_pi
           if-no-files-found: error
           retention-days: 30
-          compression-level: 0

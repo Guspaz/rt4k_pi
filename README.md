@@ -22,8 +22,8 @@ Development builds are available for Raspberry Pi OS Lite **64-bit, Bookworm (De
 
 1. Sign in to GitHub and open this repository's **Actions** tab.
 2. Select **CI**, then a successful run for the branch or commit you want (normally `master`).
-3. Download the **rt4k_pi-linux-arm64** artifact and unzip it.
-4. Copy `rt4k_pi-linux-arm64.tar.gz` to the Pi and extract it with `tar -xzf rt4k_pi-linux-arm64.tar.gz` in a separate folder. The archive contains only `rt4k_pi`, with its executable permissions preserved. Follow the setup instructions above for a new installation.
+3. Download the **rt4k_pi-linux-arm64** artifact and unzip it. The ZIP contains only `rt4k_pi`.
+4. Copy `rt4k_pi` to a separate folder on the Pi, then run `chmod +x rt4k_pi` in that folder. GitHub's ZIP does not preserve executable permissions. Follow the setup instructions above for a new installation.
 
 Artifacts are kept for 30 days. Downloading a CI build does not install it or enable automatic updates.
 
