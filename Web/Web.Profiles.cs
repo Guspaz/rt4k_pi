@@ -84,6 +84,12 @@ public partial class Program
 
                 if (lines.Contains("prof load ok"))
                 {
+                    // The cached status only updates on the next poll, so the page would still
+                    // show the previous profile without this
+                    if (RT4K is not null)
+                    {
+                        await RT4K.RefreshPowerAsync();
+                    }
                     return Results.Ok();
                 }
 

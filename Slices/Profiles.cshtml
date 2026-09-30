@@ -8,6 +8,9 @@
 <div class="w3-panel">
 	<p>Click a folder to open it. Click <b>Load</b> to switch the @rt4k_pi.RT4K.DisplayName to a profile right away.</p>
 	<p>
+		<b>Loaded profile:</b> <span id="loadedProfile">@(Model.RT4K?.Profile ?? "None")</span>
+	</p>
+	<p>
 		<b>Folder:</b> <span id="breadcrumbs"></span>
 	</p>
 	<p>
@@ -139,6 +142,7 @@
 	}
 
 	function render(listing) {
+		document.getElementById("loadedProfile").textContent = listing.loaded || "None";
 		rows.replaceChildren();
 
 		if (currentPath) {
@@ -203,7 +207,7 @@
 	async function loadProfile(path, name) {
 		if (await act("Loading " + name + "...", "/Profiles/load?path=" + encodeURIComponent(path))) {
 			message.textContent = "Loaded " + name + ".";
-			setTimeout(load, 1000);
+			load();
 		}
 	}
 
