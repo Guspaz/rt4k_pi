@@ -64,6 +64,7 @@ public class Installer
         // 90 second wait before systemd resorts to SIGKILL. That stall is what a restart ends up
         // sitting on, so cut it short: there is no shutdown work worth waiting that long for.
         sb.AppendLine("TimeoutStopSec=10");
+        sb.AppendLine($"WorkingDirectory={AppContext.BaseDirectory.TrimEnd('/')}");
         sb.AppendLine($"ExecStart={Path.Combine(AppContext.BaseDirectory, "rt4k_pi")}");
         sb.AppendLine("");
         sb.AppendLine("[Install]");
@@ -704,7 +705,7 @@ public class Installer
         sb.AppendLine("   netbios name = rt4k.local");
         sb.AppendLine("");
         sb.AppendLine("[sd]");
-        sb.AppendLine($"   path = {Directory.GetCurrentDirectory()}/serialfs");
+        sb.AppendLine($"   path = {Path.Combine(AppContext.BaseDirectory, "serialfs")}");
         sb.AppendLine($"   valid users = {KsmbdUser}");
         // The FUSE mount is owned by root and reports 0777, so the share runs as root rather
         // than as an account that has no business owning anything on this system

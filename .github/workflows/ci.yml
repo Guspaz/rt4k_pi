@@ -88,10 +88,56 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  image:
+    name: Raspberry Pi OS image
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download CI build
+        uses: actions/download-artifact@v7
+        with:
+          name: rt4k_pi-linux-arm64
+          path: build
+
+      - name: Verify build
+        working-directory: build
+        run: sha256sum --check rt4k_pi.sha256
+
+      - name: Install image tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends parted xz-utils e2fsprogs
+
+      - name: Build image
+        run: sudo bash image/build-image.sh build/rt4k_pi "${{ runner.temp }}/image/rt4k_pi.img.xz"
+
+      - name: Upload image
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: rt4k_pi-image
+          path: |
+            ${{ runner.temp }}/image/rt4k_pi.img.xz
+            ${{ runner.temp }}/image/rt4k_pi.img.xz.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Publish GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, image]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -129,11 +175,18 @@ jobs:
           name: rt4k_pi-linux-arm64
           path: release
 
+      - name: Download image
+        uses: actions/download-artifact@v7
+        with:
+          name: rt4k_pi-image
+          path: release
+
       - name: Verify build
         working-directory: release
         run: |
           chmod +x rt4k_pi
           sha256sum --check rt4k_pi.sha256
+          sha256sum --check rt4k_pi.img.xz.sha256
 
       - name: Create release
         env:
@@ -141,6 +194,7 @@ jobs:
         run: >-
           gh release create "$GITHUB_REF_NAME"
           release/rt4k_pi release/rt4k_pi.sha256
+          release/rt4k_pi.img.xz release/rt4k_pi.img.xz.sha256
           --title "$GITHUB_REF_NAME"
           --notes-from-tag
           --verify-tag

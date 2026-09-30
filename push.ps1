@@ -17,6 +17,8 @@ param(
 	[string]$Repository = '',
 	[ValidatePattern('^[A-Za-z_][A-Za-z0-9_-]*@[A-Za-z0-9][A-Za-z0-9.-]*$')]
 	[string]$Pi = 'pi@rt4k.local',
+	[ValidatePattern('^[A-Za-z0-9_./-]*$')]
+	[string]$PiPath = '',
 	[ValidateRange(30, 3600)]
 	[int]$RunStartTimeoutSeconds = 180,
 	[ValidateRange(60, 7200)]
@@ -302,13 +304,16 @@ try {
 	Clear-RemoteBuild
 	if (-not $cleanupState.Finished) { throw 'Build succeeded, but remote cleanup was incomplete. Resolve the warnings above before deploying.' }
 
-	$piTemporaryFile = ".rt4k_pi-$invocationId"
+	$piTarget = if ($PiPath) { "$($PiPath.TrimEnd('/'))/rt4k_pi" } else { 'rt4k_pi' }
+	$piTemporaryFile = if ($PiPath) { "$($PiPath.TrimEnd('/'))/.rt4k_pi-$invocationId" } else { ".rt4k_pi-$invocationId" }
+	$piSudo = if ($PiPath) { 'sudo ' } else { '' }
 	$piUploadAttempted = $true
 	Write-Host "Copying executable to $Pi..."
-	Invoke-Tool scp ($sshOptions + @($binary, "${Pi}:$piTemporaryFile")) -TimeoutSeconds 300
+	Invoke-Tool scp ($sshOptions + @($binary, "${Pi}:.rt4k_pi-$invocationId")) -TimeoutSeconds 300
 	Write-Host 'Starting rt4k_pi on the Pi...'
+	$move = if ($PiPath) { "sudo mv -f -- .rt4k_pi-$invocationId $piTemporaryFile && " } else { '' }
 	Invoke-Tool ssh ($sshOptions + @('-t', $Pi,
-		"chmod +x -- $piTemporaryFile && mv -f -- $piTemporaryFile rt4k_pi && sudo ./rt4k_pi")) -TimeoutSeconds 900
+		"$move${piSudo}chmod +x -- $piTemporaryFile && ${piSudo}mv -f -- $piTemporaryFile $piTarget && sudo $(if ($PiPath) { $piTarget } else { './rt4k_pi' })")) -TimeoutSeconds 900
 	$piUploadAttempted = $false
 	if (-not $NoFollow) {
 		Write-Host 'Following the Pi journal (Ctrl+C to stop)...'
@@ -321,7 +326,7 @@ finally {
 	if ($piUploadAttempted) {
 		try {
 			Invoke-Tool ssh ($sshOptions + @('-n', $Pi,
-				"rm -f -- $piTemporaryFile")) -Capture -TimeoutSeconds 30 | Out-Null
+				"rm -f -- .rt4k_pi-$invocationId; $(if ($PiPath) { "sudo -n rm -f -- $piTemporaryFile" })")) -Capture -TimeoutSeconds 30 | Out-Null
 		}
 		catch { Write-Warning "Could not remove temporary upload ${Pi}:$piTemporaryFile : $_" }
 	}

@@ -12,16 +12,11 @@ Use rt4k_pi only on a trusted home network. Do not expose its web interface, fil
 
 ## Setup
 
-Incomplete installation instructions can be found at: https://github.com/Guspaz/rt4k_pi/blob/master/setup.md
+Step-by-step instructions are in [setup.md](https://github.com/Guspaz/rt4k_pi/blob/master/setup.md). In short: download `rt4k_pi.img.xz` from the latest [release](https://github.com/Guspaz/rt4k_pi/releases), write it to a microSD card with the Raspberry Pi Imager ("Use custom"), enter your Wi-Fi details, and boot the Pi. The web UI is then at http://rt4k.local.
 
-The missing instructions are basically, use SSH/SCP to copy the rt4k_pi binary over to the /home/pi folder (assuming you used "pi" as the username) and run it, it will handle the rest of the install/config/setup itself.
+### Installing on an existing Pi
 
-### Downloading rt4k_pi
-
-Releases are for Raspberry Pi OS Lite **64-bit, Bookworm (Debian 12) or newer**. They contain a single executable and do not require installing .NET on the Pi.
-
-1. Open this repository's [Releases](https://github.com/Guspaz/rt4k_pi/releases) page and download `rt4k_pi` from the latest release.
-2. Copy `rt4k_pi` to a separate folder on the Pi, then run `chmod +x rt4k_pi` in that folder. Follow the setup instructions above for a new installation.
+Releases also include a standalone `rt4k_pi` executable for Raspberry Pi OS Lite **64-bit, Bookworm (Debian 12) or newer**. Copy it to its own folder on the Pi, run `chmod +x rt4k_pi`, then `sudo ./rt4k_pi`. It installs itself as a service.
 
 Once installed, rt4k_pi updates itself from the Settings page.
 
