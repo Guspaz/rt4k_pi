@@ -121,7 +121,14 @@ jobs:
           sudo apt-get install --yes --no-install-recommends parted xz-utils e2fsprogs
 
       - name: Build image
-        run: sudo bash image/build-image.sh build/rt4k_pi "${{ runner.temp }}/image/rt4k_pi.img.xz"
+        run: |
+          if [[ "$GITHUB_REF" =~ ^refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            export IMAGE_VERSION="${BASH_REMATCH[1]}"
+            export IMAGE_URL="https://github.com/${{ github.repository }}/releases/download/$IMAGE_VERSION/rt4k_pi.img.xz"
+          else
+            export IMAGE_URL="https://example.invalid/rt4k_pi.img.xz"
+          fi
+          sudo --preserve-env=IMAGE_URL,IMAGE_VERSION bash image/build-image.sh build/rt4k_pi "${{ runner.temp }}/image/rt4k_pi.img.xz"
 
       - name: Upload image
         uses: actions/upload-artifact@v7.0.1
@@ -130,6 +137,7 @@ jobs:
           path: |
             ${{ runner.temp }}/image/rt4k_pi.img.xz
             ${{ runner.temp }}/image/rt4k_pi.img.xz.sha256
+            ${{ runner.temp }}/image/rt4k_pi.json
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
@@ -194,7 +202,7 @@ jobs:
         run: >-
           gh release create "$GITHUB_REF_NAME"
           release/rt4k_pi release/rt4k_pi.sha256
-          release/rt4k_pi.img.xz release/rt4k_pi.img.xz.sha256
+          release/rt4k_pi.img.xz release/rt4k_pi.img.xz.sha256 release/rt4k_pi.json
           --title "$GITHUB_REF_NAME"
           --notes-from-tag
           --verify-tag

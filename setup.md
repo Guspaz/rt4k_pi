@@ -14,13 +14,17 @@
 
 ## Instructions
 
-1. Download `rt4k_pi.img.xz` from the latest release: https://github.com/Guspaz/rt4k_pi/releases. You don't need to unzip it.
-
 1. Download the Raspberry Pi Imager (https://www.raspberrypi.com/software/) and run it
+
+1. Open the Imager's "App Options" (the gear/settings button), choose "Content Repository" → "Use custom URL", and enter:
+
+   `https://github.com/Guspaz/rt4k_pi/releases/latest/download/rt4k_pi.json`
+
+   If your Imager doesn't have that option, start it from a command prompt instead: `rpi-imager --repo https://github.com/Guspaz/rt4k_pi/releases/latest/download/rt4k_pi.json`
 
 1. Select the device type "Raspberry Pi Zero 2 W"
 
-1. For the operating system, scroll to the bottom, choose "Use custom", and select the `rt4k_pi.img.xz` file you downloaded.
+1. For the operating system, choose "rt4k_pi". The Imager downloads it for you.
 
 1. Insert your microSD card into the computer and choose it in the imager, then click "NEXT"
 

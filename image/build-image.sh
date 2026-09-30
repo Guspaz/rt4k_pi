@@ -142,6 +142,31 @@ unmount
 
 echo "Compressing image..."
 mkdir -p "$(dirname "$output")"
+extract_size="$(stat -c %s "$image")"
+extract_sha256="$(sha256sum "$image" | cut -d' ' -f1)"
 xz -T0 -6 -c "$image" > "$output"
 (cd "$(dirname "$output")" && sha256sum "$(basename "$output")" > "$(basename "$output").sha256")
+
+# Raspberry Pi Imager repository file. Imager only offers its customization screen (Wi-Fi,
+# user, SSH) for images listed in a repository with an init_format, not for "Use custom".
+if [ -n "${IMAGE_URL:-}" ]; then
+    cat > "$(dirname "$output")/rt4k_pi.json" <<EOF
+{
+  "os_list": [
+    {
+      "name": "rt4k_pi${IMAGE_VERSION:+ $IMAGE_VERSION}",
+      "description": "Raspberry Pi OS Lite with rt4k_pi preinstalled (Raspberry Pi Zero 2 W)",
+      "icon": "https://downloads.raspberrypi.com/raspios_armhf/Raspberry_Pi_OS_(32-bit).png",
+      "url": "$IMAGE_URL",
+      "extract_size": $extract_size,
+      "extract_sha256": "$extract_sha256",
+      "image_download_size": $(stat -c %s "$output"),
+      "release_date": "$(date -u +%Y-%m-%d)",
+      "init_format": "cloudinit-rpi",
+      "devices": ["pi3-64bit"]
+    }
+  ]
+}
+EOF
+fi
 echo "Wrote $output"
