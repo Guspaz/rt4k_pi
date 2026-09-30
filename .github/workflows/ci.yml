@@ -39,6 +39,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends clang zlib1g-dev
 
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            version="${BASH_REMATCH[1]}"
+            informational="$version"
+          else
+            version="0.0.0-dev.${{ github.run_number }}"
+            informational="$version+${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "informational=$informational" >> "$GITHUB_OUTPUT"
+          echo "Building version $informational"
+
       - name: Publish Release executable
         run: >-
           dotnet publish rt4k_pi.csproj
@@ -46,6 +60,8 @@ jobs:
           --runtime linux-arm64
           --self-contained true
           -p:PublishAot=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:InformationalVersion=${{ steps.version.outputs.informational }}
           --output "${{ runner.temp }}/rt4k_pi-publish"
 
       - name: Validate executable
@@ -58,10 +74,73 @@ jobs:
             exit 1
           fi
 
+      - name: Write SHA-256
+        working-directory: ${{ runner.temp }}/rt4k_pi-publish
+        run: sha256sum rt4k_pi > rt4k_pi.sha256
+
       - name: Upload CI build
         uses: actions/upload-artifact@v7.0.1
         with:
           name: rt4k_pi-linux-arm64
-          path: ${{ runner.temp }}/rt4k_pi-publish/rt4k_pi
+          path: |
+            ${{ runner.temp }}/rt4k_pi-publish/rt4k_pi
+            ${{ runner.temp }}/rt4k_pi-publish/rt4k_pi.sha256
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+
+      - name: Validate tag
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must look like v1.2.3 (got '$tag')."
+            exit 1
+          fi
+          # Checkout can leave the tag without its annotation, so fetch the tag object itself
+          git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
+          if [[ "$(git cat-file -t "$tag")" != "tag" ]]; then
+            echo "::error::'$tag' is a lightweight tag. Release notes come from the tag message, so delete it and create an annotated tag instead: git tag -a $tag -F notes.md"
+            exit 1
+          fi
+          if [[ -z "$(git for-each-ref --format='%(contents)' "refs/tags/$tag" | tr -d '[:space:]')" ]]; then
+            echo "::error::'$tag' has an empty message. Write the release notes in the tag message."
+            exit 1
+          fi
+
+      - name: Download CI build
+        uses: actions/download-artifact@v7
+        with:
+          name: rt4k_pi-linux-arm64
+          path: release
+
+      - name: Verify build
+        working-directory: release
+        run: |
+          chmod +x rt4k_pi
+          sha256sum --check rt4k_pi.sha256
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          release/rt4k_pi release/rt4k_pi.sha256
+          --title "$GITHUB_REF_NAME"
+          --notes-from-tag
+          --verify-tag
