@@ -76,7 +76,9 @@ jobs:
 
       - name: Write SHA-256
         working-directory: ${{ runner.temp }}/rt4k_pi-publish
-        run: sha256sum rt4k_pi > rt4k_pi.sha256
+        run: |
+          sha256sum rt4k_pi > rt4k_pi.sha256
+          gzip -9 -n -k rt4k_pi
 
       - name: Upload CI build
         uses: actions/upload-artifact@v7.0.1
@@ -85,6 +87,7 @@ jobs:
           path: |
             ${{ runner.temp }}/rt4k_pi-publish/rt4k_pi
             ${{ runner.temp }}/rt4k_pi-publish/rt4k_pi.sha256
+            ${{ runner.temp }}/rt4k_pi-publish/rt4k_pi.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -194,6 +197,7 @@ jobs:
         run: |
           chmod +x rt4k_pi
           sha256sum --check rt4k_pi.sha256
+          gzip -dc rt4k_pi.gz | cmp - rt4k_pi
           sha256sum --check rt4k_pi.img.xz.sha256
 
       - name: Create release
@@ -201,7 +205,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "$GITHUB_REF_NAME"
-          release/rt4k_pi release/rt4k_pi.sha256
+          release/rt4k_pi release/rt4k_pi.gz release/rt4k_pi.sha256
           release/rt4k_pi.img.xz release/rt4k_pi.img.xz.sha256 release/rt4k_pi.json
           --title "$GITHUB_REF_NAME"
           --notes-from-tag

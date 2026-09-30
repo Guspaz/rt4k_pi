@@ -1,6 +1,7 @@
 ﻿namespace rt4k_pi;
 
 using System.IO;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -23,6 +24,7 @@ public class Installer
     private const string LatestReleaseUrl = "https://api.github.com/repos/Guspaz/rt4k_pi/releases/latest";
     private const string ExecutableAsset = "rt4k_pi";
     private const string HashAsset = "rt4k_pi.sha256";
+    private const string CompressedExecutableAsset = "rt4k_pi.gz";
     private const string RebootRequiredFile = "/var/run/reboot-required";
 
     // A full-upgrade on a Pi Zero 2 W can legitimately take a long time
@@ -43,7 +45,7 @@ public class Installer
     public static bool UpdateAvailable => LatestRelease is { } release && SemVer.Compare(release.Version, Program.VERSION) > 0;
     public static bool RebootRequired => OperatingSystem.IsLinux() && File.Exists(RebootRequiredFile);
 
-    public sealed record ReleaseInfo(string Version, string Notes, string? PageUrl, Uri ExecutableUrl, Uri HashUrl);
+    public sealed record ReleaseInfo(string Version, string Notes, string? PageUrl, Uri ExecutableUrl, Uri HashUrl, bool Compressed);
 
     // Package operations pull from the network and unpack onto an SD card, so the default
     // command timeout is nowhere near enough for them
@@ -273,7 +275,9 @@ public class Installer
             throw new InvalidDataException($"Invalid release tag '{release.TagName}'.");
         }
 
-        Uri executableUrl = FindAsset(release, ExecutableAsset);
+        // The compressed copy downloads much faster; the SHA-256 is of the uncompressed executable
+        bool compressed = release.Assets?.Any(a => a.Name == CompressedExecutableAsset) == true;
+        Uri executableUrl = FindAsset(release, compressed ? CompressedExecutableAsset : ExecutableAsset);
         Uri hashUrl = FindAsset(release, HashAsset);
 
         string notes = (release.Body ?? "").Replace("\r\n", "\n").Trim();
@@ -286,7 +290,7 @@ public class Installer
             ? page.AbsoluteUri
             : null;
 
-        return new ReleaseInfo(version, notes, pageUrl, executableUrl, hashUrl);
+        return new ReleaseInfo(version, notes, pageUrl, executableUrl, hashUrl, compressed);
     }
 
     private static Uri FindAsset(GitHubRelease release, string name)
@@ -315,14 +319,16 @@ public class Installer
         return hash;
     }
 
-    private async Task DownloadUpdateAsync(string archive, Uri url, byte[] expectedHash, CancellationToken token)
+    private async Task DownloadUpdateAsync(string archive, Uri url, bool compressed, byte[] expectedHash, CancellationToken token)
     {
         using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
         long? length = response.Content.Headers.ContentLength;
         if (length is <= 0 or > MaxUpdateSize) { throw new InvalidDataException("Invalid update size."); }
 
-        using var input = await response.Content.ReadAsStreamAsync(token);
+        using var network = await response.Content.ReadAsStreamAsync(token);
+        using var counter = new CountingStream(network);
+        using Stream input = compressed ? new GZipStream(counter, CompressionMode.Decompress) : counter;
         using var output = new FileStream(archive, FileMode.CreateNew, FileAccess.Write, FileShare.None, 8192, true);
         using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[8192];
@@ -334,10 +340,10 @@ public class Installer
             if (total > MaxUpdateSize) { throw new InvalidDataException("Update exceeds 256 MiB."); }
             await output.WriteAsync(buffer.AsMemory(0, read), token);
             sha256.AppendData(buffer, 0, read);
-            if (length.HasValue) { updateProgress = (int)Math.Min(90, total * 90 / length.Value); }
+            if (length.HasValue) { updateProgress = (int)Math.Min(90, counter.Total * 90 / length.Value); }
         }
 
-        if (total == 0 || (length.HasValue && total != length.Value) ||
+        if (total == 0 || (length.HasValue && counter.Total != length.Value) ||
             !CryptographicOperations.FixedTimeEquals(sha256.GetHashAndReset(), expectedHash))
         {
             throw new InvalidDataException("Update size or SHA-256 mismatch.");
@@ -368,7 +374,7 @@ public class Installer
             updatePhase = DownloadingPhase;
             byte[] expectedHash = await DownloadExpectedHashAsync(info.HashUrl, timeout.Token);
             string staged = Path.Combine(directory, ExecutableAsset);
-            await DownloadUpdateAsync(staged, info.ExecutableUrl, expectedHash, timeout.Token);
+            await DownloadUpdateAsync(staged, info.ExecutableUrl, info.Compressed, expectedHash, timeout.Token);
 
             var file = new FileInfo(staged);
             if (!file.Exists || file.LinkTarget != null || file.Length < 64 || file.Length > MaxUpdateSize)
