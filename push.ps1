@@ -5,7 +5,7 @@
 Build local working files on GitHub Actions, then deploy to the Pi.
 .DESCRIPTION
 Requires Git for Windows, GitHub CLI, and Windows
-OpenSSH ssh/scp/ssh-keygen/ssh-keyscan. Git push authentication and a Git author identity must be set up.
+OpenSSH ssh/scp/ssh-keygen. Git push authentication and a Git author identity must be set up.
 Expects a Pi flashed from the release image, with user "pi" and rt4k_pi installed in /opt/rt4k_pi.
 The first run (and the first run after reflashing) asks you to confirm the Pi's host key fingerprint and
 prompts for the pi password to install a dedicated SSH key and enable passwordless sudo.
@@ -110,8 +110,19 @@ function Initialize-PiAccess {
 		Invoke-Tool ssh-keygen @('-q', '-t', 'ed25519', '-N', '', '-C', 'rt4k_pi-push', '-f', $piKey) -Capture | Out-Null
 	}
 
-	$scanned = @((Invoke-Tool ssh-keyscan @('-T', '15', '-t', 'ed25519', $PiHost) -Capture) -split '\r?\n' |
-		Where-Object { $_ -match '^\S+\s+ssh-ed25519\s+\S+' })
+	# Windows ssh-keyscan aborts on key exchange methods it doesn't know, so let ssh record the
+	# host key into a scratch file instead. Authentication is expected to fail; only the key matters.
+	$scanFile = Join-Path ([IO.Path]::GetTempPath()) "rt4k_pi-hostkey-$([Guid]::NewGuid().ToString('N'))"
+	try {
+		$null = Invoke-Tool ssh @('-o', "UserKnownHostsFile=$scanFile", '-o', 'GlobalKnownHostsFile=NUL',
+			'-o', 'StrictHostKeyChecking=accept-new', '-o', 'HashKnownHosts=no', '-o', 'HostKeyAlgorithms=ssh-ed25519',
+			'-o', 'BatchMode=yes', '-o', 'PreferredAuthentications=none', '-o', 'ConnectTimeout=15',
+			'-n', '-T', "nobody@$PiHost", 'true') -Capture -ReturnExitCode -TimeoutSeconds 30
+		$scanned = @(if (Test-Path -LiteralPath $scanFile) {
+			Get-Content -LiteralPath $scanFile | Where-Object { $_ -match '^\S+\s+ssh-ed25519\s+\S+' }
+		})
+	}
+	finally { Remove-Item -LiteralPath $scanFile -Force -ErrorAction SilentlyContinue }
 	if ($scanned.Count -ne 1) { throw "Could not read the SSH host key from $PiHost. Is the Pi powered on and on the network?" }
 	$hostKey = ($scanned[0] -split '\s+')[2]
 	$known = @()
@@ -215,7 +226,7 @@ $runId = $null
 $cleanupState = @{ RunDeleted = $false; RefDeleted = $false; Finished = $false }
 $piUploadAttempted = $false
 try {
-	foreach ($tool in 'git', 'gh', 'ssh', 'scp', 'ssh-keygen', 'ssh-keyscan') {
+	foreach ($tool in 'git', 'gh', 'ssh', 'scp', 'ssh-keygen') {
 		$null = Get-Command $tool -CommandType Application -ErrorAction Stop
 	}
 	foreach ($variable in 'GIT_INDEX_FILE', 'GIT_DIR', 'GIT_WORK_TREE') {
