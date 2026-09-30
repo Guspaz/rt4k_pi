@@ -5,9 +5,10 @@
 Build local working files on GitHub Actions, then deploy to the Pi.
 .DESCRIPTION
 Requires Git for Windows, GitHub CLI, and Windows
-OpenSSH ssh/scp. Git push authentication and a Git author identity must be set up.
-Verify the Pi's SSH host fingerprint and configure trusted host keys and public-key
-authentication in Windows SSH before running. Sudo still prompts for the Pi password.
+OpenSSH ssh/scp/ssh-keygen/ssh-keyscan. Git push authentication and a Git author identity must be set up.
+Expects a Pi flashed from the release image, with user "pi" and rt4k_pi installed in /opt/rt4k_pi.
+The first run (and the first run after reflashing) asks you to confirm the Pi's host key fingerprint and
+prompts for the pi password to install a dedicated SSH key and enable passwordless sudo.
 #>
 [CmdletBinding()]
 param(
@@ -15,10 +16,8 @@ param(
 	[string]$Remote = 'origin',
 	[ValidatePattern('^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?$')]
 	[string]$Repository = '',
-	[ValidatePattern('^[A-Za-z_][A-Za-z0-9_-]*@[A-Za-z0-9][A-Za-z0-9.-]*$')]
-	[string]$Pi = 'pi@rt4k.local',
-	[ValidatePattern('^[A-Za-z0-9_./-]*$')]
-	[string]$PiPath = '',
+	[ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.-]*$')]
+	[string]$PiHost = 'rt4k.local',
 	[ValidateRange(30, 3600)]
 	[int]$RunStartTimeoutSeconds = 180,
 	[ValidateRange(60, 7200)]
@@ -33,8 +32,15 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = $PSScriptRoot
 $workflow = 'ci.yml'
 $artifact = 'rt4k_pi-linux-arm64'
-$sshOptions = @('-o', 'BatchMode=yes', '-o', 'PreferredAuthentications=publickey',
-	'-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no', '-o', 'ConnectTimeout=15')
+$Pi = "pi@$PiHost"
+$piInstallDir = '/opt/rt4k_pi'
+$sshDirectory = Join-Path $HOME '.ssh'
+$piKey = Join-Path $sshDirectory 'rt4k_pi_ed25519'
+$piKnownHosts = Join-Path $sshDirectory 'rt4k_pi_known_hosts'
+$sshCommonOptions = @('-o', "UserKnownHostsFile=$piKnownHosts", '-o', 'StrictHostKeyChecking=yes',
+	'-o', 'UpdateHostKeys=no', '-o', 'ConnectTimeout=15')
+$sshOptions = $sshCommonOptions + @('-i', $piKey, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes',
+	'-o', 'PreferredAuthentications=publickey')
 
 function Invoke-Tool {
 	param(
@@ -94,6 +100,50 @@ function Invoke-Tool {
 	finally {
 		if ($started -and -not $process.HasExited) { $process.Kill($true); $process.WaitForExit() }
 		$process.Dispose()
+	}
+}
+
+function Initialize-PiAccess {
+	if (-not (Test-Path -LiteralPath $sshDirectory)) { $null = New-Item -ItemType Directory -Path $sshDirectory }
+	if (-not (Test-Path -LiteralPath $piKey)) {
+		Write-Host "Creating SSH key $piKey..."
+		Invoke-Tool ssh-keygen @('-q', '-t', 'ed25519', '-N', '', '-C', 'rt4k_pi-push', '-f', $piKey) -Capture | Out-Null
+	}
+
+	$scanned = @((Invoke-Tool ssh-keyscan @('-T', '15', '-t', 'ed25519', $PiHost) -Capture) -split '\r?\n' |
+		Where-Object { $_ -match '^\S+\s+ssh-ed25519\s+\S+' })
+	if ($scanned.Count -ne 1) { throw "Could not read the SSH host key from $PiHost. Is the Pi powered on and on the network?" }
+	$hostKey = ($scanned[0] -split '\s+')[2]
+	$known = @()
+	if (Test-Path -LiteralPath $piKnownHosts) { $known = @(Get-Content -LiteralPath $piKnownHosts) }
+	$current = @($known | Where-Object { ($_ -split '\s+')[0] -ceq $PiHost })
+	$trusted = $current.Count -eq 1 -and ($current[0] -split '\s+')[1] -eq 'ssh-ed25519' -and ($current[0] -split '\s+')[2] -ceq $hostKey
+	if (-not $trusted) {
+		$fingerprint = 'SHA256:' + [Convert]::ToBase64String(
+			[Security.Cryptography.SHA256]::HashData([Convert]::FromBase64String($hostKey))).TrimEnd('=')
+		if ($current.Count) { Write-Warning "The SSH host key for $PiHost has changed (expected after reflashing the Pi)." }
+		Write-Host "Host key fingerprint for ${PiHost}: ED25519 $fingerprint"
+		$answer = Read-Host 'Trust this host key? (yes/no)'
+		if ($answer -ne 'yes') { throw 'Host key not trusted; nothing was deployed.' }
+		$kept = @($known | Where-Object { ($_ -split '\s+')[0] -cne $PiHost })
+		Set-Content -LiteralPath $piKnownHosts -Value ($kept + "$PiHost ssh-ed25519 $hostKey")
+	}
+
+	Write-Host "Checking key-only SSH and passwordless sudo on $Pi..."
+	if ((Invoke-Tool ssh ($sshOptions + @('-n', '-T', $Pi, 'sudo -n true')) -ReturnExitCode -TimeoutSeconds 30) -eq 0) { return }
+
+	Write-Host "Setting up SSH key login and passwordless sudo on $Pi. Enter the pi password when asked (twice: SSH, then sudo)."
+	$publicKey = (Get-Content -LiteralPath "$piKey.pub" -Raw).Trim()
+	if ($publicKey -notmatch '^ssh-ed25519 [A-Za-z0-9+/=]+ rt4k_pi-push$') { throw "Unexpected public key format in $piKey.pub." }
+	$setup = "set -e; umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; " +
+		"grep -qxF '$publicKey' ~/.ssh/authorized_keys || echo '$publicKey' >> ~/.ssh/authorized_keys; " +
+		"chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys; t=`$(mktemp); trap 'rm -f `$t' EXIT; " +
+		"echo 'pi ALL=(ALL) NOPASSWD: ALL' > `$t; sudo visudo -cf `$t >/dev/null; " +
+		"sudo install -m 0440 -o root -g root `$t /etc/sudoers.d/010_rt4k_pi-nopasswd"
+	Invoke-Tool ssh ($sshCommonOptions + @('-o', 'PubkeyAuthentication=no',
+		'-o', 'PreferredAuthentications=password,keyboard-interactive', '-t', $Pi, $setup)) -TimeoutSeconds 300
+	if ((Invoke-Tool ssh ($sshOptions + @('-n', '-T', $Pi, 'sudo -n true')) -ReturnExitCode -TimeoutSeconds 30) -ne 0) {
+		throw "Key login or passwordless sudo still does not work on $Pi after setup."
 	}
 }
 
@@ -165,7 +215,7 @@ $runId = $null
 $cleanupState = @{ RunDeleted = $false; RefDeleted = $false; Finished = $false }
 $piUploadAttempted = $false
 try {
-	foreach ($tool in 'git', 'gh', 'ssh', 'scp') {
+	foreach ($tool in 'git', 'gh', 'ssh', 'scp', 'ssh-keygen', 'ssh-keyscan') {
 		$null = Get-Command $tool -CommandType Application -ErrorAction Stop
 	}
 	foreach ($variable in 'GIT_INDEX_FILE', 'GIT_DIR', 'GIT_WORK_TREE') {
@@ -190,13 +240,7 @@ try {
 		throw "Repository '$Repository' does not match remote '$Remote' ($remoteRepository)."
 	}
 	$Repository = $remoteRepository
-	Write-Host "Checking key-only SSH on $Pi..."
-	try {
-		Invoke-Tool ssh ($sshOptions + @('-n', '-T', $Pi, 'true')) -Capture -TimeoutSeconds 30 | Out-Null
-	}
-	catch {
-		throw "Pi SSH preflight failed before starting a build. Verify the host fingerprint and Windows known_hosts entry for $Pi, and install your Windows SSH public key in the remote user's ~/.ssh/authorized_keys. Details: $_"
-	}
+	Initialize-PiAccess
 	$authArguments = @('auth', 'status', '--hostname', 'github.com', '--active')
 	$authExitCode = Invoke-Tool gh $authArguments -ReturnExitCode
 	if ($authExitCode -in 1, 4) {
@@ -304,16 +348,14 @@ try {
 	Clear-RemoteBuild
 	if (-not $cleanupState.Finished) { throw 'Build succeeded, but remote cleanup was incomplete. Resolve the warnings above before deploying.' }
 
-	$piTarget = if ($PiPath) { "$($PiPath.TrimEnd('/'))/rt4k_pi" } else { 'rt4k_pi' }
-	$piTemporaryFile = if ($PiPath) { "$($PiPath.TrimEnd('/'))/.rt4k_pi-$invocationId" } else { ".rt4k_pi-$invocationId" }
-	$piSudo = if ($PiPath) { 'sudo ' } else { '' }
+	$piUpload = ".rt4k_pi-$invocationId"
+	$piStaged = "$piInstallDir/rt4k_pi.new"
 	$piUploadAttempted = $true
 	Write-Host "Copying executable to $Pi..."
-	Invoke-Tool scp ($sshOptions + @($binary, "${Pi}:.rt4k_pi-$invocationId")) -TimeoutSeconds 300
-	Write-Host 'Starting rt4k_pi on the Pi...'
-	$move = if ($PiPath) { "sudo mv -f -- .rt4k_pi-$invocationId $piTemporaryFile && " } else { '' }
-	Invoke-Tool ssh ($sshOptions + @('-t', $Pi,
-		"$move${piSudo}chmod +x -- $piTemporaryFile && ${piSudo}mv -f -- $piTemporaryFile $piTarget && sudo $(if ($PiPath) { $piTarget } else { './rt4k_pi' })")) -TimeoutSeconds 900
+	Invoke-Tool scp ($sshOptions + @($binary, "${Pi}:$piUpload")) -TimeoutSeconds 300
+	Write-Host 'Installing and restarting rt4k_pi on the Pi...'
+	Invoke-Tool ssh ($sshOptions + @('-n', '-T', $Pi,
+		"sudo install -D -m 0755 -- $piUpload $piStaged && sudo mv -f -- $piStaged $piInstallDir/rt4k_pi && rm -f -- $piUpload && sudo systemctl restart rt4k")) -TimeoutSeconds 120
 	$piUploadAttempted = $false
 	if (-not $NoFollow) {
 		Write-Host 'Following the Pi journal (Ctrl+C to stop)...'
@@ -326,9 +368,9 @@ finally {
 	if ($piUploadAttempted) {
 		try {
 			Invoke-Tool ssh ($sshOptions + @('-n', $Pi,
-				"rm -f -- .rt4k_pi-$invocationId; $(if ($PiPath) { "sudo -n rm -f -- $piTemporaryFile" })")) -Capture -TimeoutSeconds 30 | Out-Null
+				"rm -f -- $piUpload; sudo -n rm -f -- $piStaged")) -Capture -TimeoutSeconds 30 | Out-Null
 		}
-		catch { Write-Warning "Could not remove temporary upload ${Pi}:$piTemporaryFile : $_" }
+		catch { Write-Warning "Could not remove temporary upload on ${Pi}: $_" }
 	}
 	if ($tempDirectory -and (Test-Path -LiteralPath $tempDirectory)) {
 		try { Remove-Item -LiteralPath $tempDirectory -Recurse -Force }
