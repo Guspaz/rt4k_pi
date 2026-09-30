@@ -127,6 +127,12 @@ public class Installer
         if (Updating)
         {
             string phase = updatePhase;
+            if (phase == SystemUpgradePhase)
+            {
+                TimeSpan elapsed = systemUpgradeTimer.Elapsed;
+                string time = elapsed.TotalMinutes >= 1 ? $"{(int)elapsed.TotalMinutes} min" : "under a minute";
+                return $"{phase}: {systemUpgradeDetail} — {time} so far";
+            }
             return phase == DownloadingPhase ? $"{phase} ({UpdateProgress}%)" : phase;
         }
         else if (!string.IsNullOrWhiteSpace(UpdateError))
@@ -228,7 +234,7 @@ public class Installer
 
     private const string CheckingPhase = "Checking for the latest release";
     private const string DownloadingPhase = "Downloading";
-    private const string SystemUpgradePhase = "Updating the Pi's system software (this can take a while)";
+    private const string SystemUpgradePhase = "Updating the Pi's system software";
     private const string InstallingPhase = "Installing";
     private const string RestartingPhase = "Restarting";
 
@@ -391,14 +397,22 @@ public class Installer
             File.Copy(executable, backup, overwrite: true);
             File.Move(staged, executable, overwrite: true);
             replaced = true;
-            Directory.Delete(directory, recursive: true);
+            try { Directory.Delete(directory, recursive: true); } catch { }
             updateProgress = 100;
             updatePhase = RestartingPhase;
             Console.WriteLine($"Installed rt4k_pi {info.Version}, restarting");
-            DoInstall();
+
+            // Past this point the new version is in place and must never be rolled back: the
+            // restart stops our whole cgroup, which can kill systemctl itself mid-command and make
+            // it look like a failure even though systemd already has the restart queued.
+            replaced = false;
+            try { DoInstall(); }
+            catch (Exception ex) { Console.WriteLine($"Restart after update reported: {ex.Message}"); }
+            Environment.Exit(0);
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"Update error: {ex.Message}");
             if (replaced)
             {
                 try { File.Move(backup, executable, overwrite: true); }
@@ -421,20 +435,41 @@ public class Installer
         updatePhase = "";
     }
 
+    private volatile string systemUpgradeDetail = "";
+    private readonly System.Diagnostics.Stopwatch systemUpgradeTimer = new();
+
     /// <summary>
     /// Brings the Pi's packages up to date, so an existing install ends up on the same footing
     /// as a fresh one. Never prompts: config files the user changed are kept as they are.
+    /// Progress is one percentage across the whole step so it never goes backwards: preparing
+    /// 0-10%, downloading 10-40%, installing 40-100%.
     /// </summary>
-    private static void UpgradeSystemPackages()
+    private void UpgradeSystemPackages()
     {
         const string env = "env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a";
         const string options = "-o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold";
+        systemUpgradeTimer.Restart();
+        systemUpgradePercent = 0;
         try
         {
             Console.WriteLine("Updating system packages");
+            systemUpgradeDetail = "checking for updates (0%)";
             Util.RunElevated($"{env} dpkg --configure -a", SystemUpgradeTimeoutMs);
             Util.RunElevated($"{env} apt-get {options} update", PackageTimeoutMs);
-            Util.RunElevated($"{env} apt-get {options} -y full-upgrade", SystemUpgradeTimeoutMs);
+
+            string plan = Util.RunElevated($"{env} apt-get {options} -s full-upgrade", PackageTimeoutMs);
+            int packages = plan.Split('\n').Count(line => line.StartsWith("Inst ", StringComparison.Ordinal));
+            if (packages == 0)
+            {
+                systemUpgradeDetail = "already up to date (100%)";
+                Console.WriteLine("System packages already up to date");
+                return;
+            }
+
+            Console.WriteLine($"Upgrading {packages} system package(s)");
+            systemUpgradeDetail = $"{packages} package{(packages == 1 ? "" : "s")} to update (10%)";
+            Util.RunElevatedStreaming($"{env} apt-get {options} -o APT::Status-Fd=1 -y full-upgrade", SystemUpgradeTimeoutMs, ReportAptStatus);
+            systemUpgradeDetail = "finished (100%)";
             Console.WriteLine(RebootRequired ? "System packages updated; a reboot is required" : "System packages updated");
         }
         catch (Exception ex) when (ex.Message.Contains("get lock", StringComparison.OrdinalIgnoreCase) ||
@@ -442,6 +477,39 @@ public class Installer
         {
             throw new InvalidOperationException("The Pi is busy installing other system updates. Try again in a few minutes.", ex);
         }
+        finally
+        {
+            systemUpgradeTimer.Stop();
+        }
+    }
+
+    private int systemUpgradePercent;
+
+    /// <summary>
+    /// Parses apt's machine-readable status lines ("dlstatus:3:42.5:Retrieving file 3 of 12",
+    /// "pmstatus:libc6:67.1:Unpacking libc6") into the status shown on the Settings page.
+    /// </summary>
+    private void ReportAptStatus(string line)
+    {
+        string[] fields = line.Split(':', 4);
+        if (fields.Length < 4 ||
+            !double.TryParse(fields[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double percent))
+        {
+            return;
+        }
+
+        percent = Math.Clamp(percent, 0, 100);
+        (int overall, string detail) = fields[0] switch
+        {
+            "dlstatus" => ((int)(10 + percent * 0.3), $"downloading ({fields[3].Trim()})"),
+            "pmstatus" => ((int)(40 + percent * 0.6), $"installing {fields[1]}"),
+            _ => (-1, "")
+        };
+        if (overall < 0) { return; }
+
+        overall = Math.Max(overall, systemUpgradePercent);
+        systemUpgradePercent = overall;
+        systemUpgradeDetail = $"{detail} ({overall}%)";
     }
 
     public bool IsKsmbdInstalled()

@@ -16,8 +16,11 @@
             <tr>
                 <th>Update:</th>
                 <td>
-                    <details>
-                        <summary>What's new in v@(release.Version)</summary>
+                    <details id="releaseNotes">
+                        <summary style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                            <span>What's new in v@(release.Version)</span>
+                            <span id="releaseNotesAction" class="w3-button w3-border w3-round" style="white-space: nowrap;">+</span>
+                        </summary>
                         <div style="white-space: pre-wrap; max-height: 400px; overflow-y: auto; margin: 8px 0;">@(string.IsNullOrWhiteSpace(release.Notes) ? "No release notes." : release.Notes)</div>
                         @if (release.PageUrl != null)
                         {
@@ -25,7 +28,7 @@
                         }
                     </details>
                     <p class="w3-small w3-text-grey">Installing also updates the Pi's system software, which can take several minutes. Keep the Pi powered until this page reloads.</p>
-                    <button class="@LayoutModel.ButtonClasses" onclick="installUpdate(); return false;" type="button" id="installUpdateButton">Install v@(release.Version)</button>
+                    id="installUpdateButton" disabled="@(rt4k_pi.Program.Installer.Updating ? "disabled" : null)">Install
                 </td>
             </tr>
         }
@@ -33,7 +36,7 @@
         {
             <tr><th>Restart:</th><td>Some system updates will finish the next time the Pi restarts.</td></tr>
         }
-        <tr><th>Status:</th><td id="updateStatus">Idle</td></tr>
+        <td id="updateStatus">@(rt4k_pi.Program.Installer.GetStatus())</td>
     </table>
 </div>
 
@@ -108,6 +111,13 @@
 
     // Start the update loop
     updateTableCell();
+
+    const releaseNotes = document.getElementById("releaseNotes");
+    if (releaseNotes) {
+        releaseNotes.addEventListener("toggle", () => {
+            document.getElementById("releaseNotesAction").textContent = releaseNotes.open ? "\u2212" : "+";
+        });
+    }
 </script>
 
 <h2>Services</h2>

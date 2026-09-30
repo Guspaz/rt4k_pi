@@ -100,6 +100,82 @@ public partial class Util
     /// <summary>Whether this process is already running as root, so sudo would be redundant.</summary>
     public static bool IsRoot { get; } = OperatingSystem.IsLinux() && geteuid() == 0;
 
+    /// <summary>
+    /// Like <see cref="RunElevated"/>, but hands each line of standard output to
+    /// <paramref name="onLine"/> as it arrives, for long commands that report their own progress.
+    /// </summary>
+    public static void RunElevatedStreaming(string arguments, int timeoutMs, Action<string> onLine)
+    {
+        string fileName;
+        string args;
+        if (!IsRoot)
+        {
+            fileName = "sudo";
+            args = $"-n {arguments}";
+        }
+        else
+        {
+            int space = arguments.IndexOf(' ');
+            fileName = space < 0 ? arguments : arguments[..space];
+            args = space < 0 ? "" : arguments[(space + 1)..];
+        }
+
+        if (Program.Settings.VerboseLogging)
+        {
+            Console.WriteLine($"exec: {fileName} {args}");
+        }
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = args,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        process.Start();
+
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        Task output = Task.Run(async () =>
+        {
+            string? line;
+            while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+            {
+                try { onLine(line); } catch { }
+            }
+        });
+
+        // Same reasoning as RunCommand: never wait on the pipes themselves, only the process
+        if (!process.WaitForExit(timeoutMs))
+        {
+            Console.WriteLine($"Timed out after {timeoutMs}ms running {fileName} {args}, killing it");
+
+            try { process.Kill(entireProcessTree: true); } catch { }
+
+            throw new Exception($"Timed out running {fileName} {args}");
+        }
+
+        try { output.Wait(PipeDrainMs); } catch { }
+
+        if (process.ExitCode != 0)
+        {
+            string message = Drain(error);
+            if (!IsRoot && message.Contains("password is required", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception(
+                    $"Root privileges are required to run \"{arguments}\", but sudo asked for a password. " +
+                    "Run rt4k_pi with sudo, or give this user passwordless sudo, so it can set itself up unattended.");
+            }
+
+            throw new Exception($"Error running {fileName} {args} - {message}");
+        }
+    }
+
     [System.Runtime.InteropServices.LibraryImport("libc", SetLastError = true)]
     private static partial uint geteuid();
 
