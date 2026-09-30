@@ -28,7 +28,7 @@
                         }
                     </details>
                     <p class="w3-small w3-text-grey">Installing also updates the Pi's system software, which can take several minutes. Keep the Pi powered until this page reloads.</p>
-                    id="installUpdateButton" disabled="@(rt4k_pi.Program.Installer.Updating ? "disabled" : null)">Install
+                    <button class="@LayoutModel.ButtonClasses" onclick="installUpdate(); return false;" type="button" id="installUpdateButton" disabled="@(Model.Installer.Updating ? "disabled" : null)">Install</button>
                 </td>
             </tr>
         }
@@ -36,11 +36,16 @@
         {
             <tr><th>Restart:</th><td>Some system updates will finish the next time the Pi restarts.</td></tr>
         }
-        <td id="updateStatus">@(rt4k_pi.Program.Installer.GetStatus())</td>
+        <tr><th>Status:</th><td id="updateStatus">@(Model.Installer.GetStatus())</td></tr>
     </table>
 </div>
 
 <script>
+    @if (Installer.LatestRelease == null)
+    {
+        <text>document.addEventListener("DOMContentLoaded", checkUpdates);</text>
+    }
+
     async function checkUpdates() {
         try {
             document.getElementById("checkUpdatesButton").disabled = true;
