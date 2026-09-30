@@ -15,14 +15,35 @@ public class Installer
     private int updating;
     private volatile int updateProgress;
     private volatile string updateError = "";
+    private volatile string updatePhase = "";
     private Task? updateTask;
-    private static readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(5) };
+    private static readonly HttpClient http = CreateHttpClient();
     private const long MaxUpdateSize = 256 * 1024 * 1024;
-    private const string VersionUrl = "https://guspaz.github.io/rt4k.version";
+    private const int MaxReleaseNotesLength = 64 * 1024;
+    private const string LatestReleaseUrl = "https://api.github.com/repos/Guspaz/rt4k_pi/releases/latest";
+    private const string ExecutableAsset = "rt4k_pi";
+    private const string HashAsset = "rt4k_pi.sha256";
+    private const string RebootRequiredFile = "/var/run/reboot-required";
+
+    // A full-upgrade on a Pi Zero 2 W can legitimately take a long time
+    private const int SystemUpgradeTimeoutMs = 60 * 60 * 1000;
+
+    private static readonly TimeSpan BackgroundCheckDelay = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan BackgroundCheckInterval = TimeSpan.FromHours(6);
+    private CancellationTokenSource? backgroundCheckCts;
+    private Task? backgroundCheckTask;
+
+    private static ReleaseInfo? latestRelease;
 
     public bool Updating => Volatile.Read(ref updating) != 0;
     public int UpdateProgress => updateProgress;
     public string UpdateError => updateError;
+
+    public static ReleaseInfo? LatestRelease => Volatile.Read(ref latestRelease);
+    public static bool UpdateAvailable => LatestRelease is { } release && SemVer.Compare(release.Version, Program.VERSION) > 0;
+    public static bool RebootRequired => OperatingSystem.IsLinux() && File.Exists(RebootRequiredFile);
+
+    public sealed record ReleaseInfo(string Version, string Notes, string? PageUrl, Uri ExecutableUrl, Uri HashUrl);
 
     // Package operations pull from the network and unpack onto an SD card, so the default
     // command timeout is nowhere near enough for them
@@ -105,7 +126,8 @@ public class Installer
     {
         if (Updating)
         {
-            return $"{UpdateProgress}%";
+            string phase = updatePhase;
+            return phase == DownloadingPhase ? $"{phase} ({UpdateProgress}%)" : phase;
         }
         else if (!string.IsNullOrWhiteSpace(UpdateError))
         {
@@ -137,13 +159,49 @@ public class Installer
     {
         try
         {
-            var info = await ReadUpdateInfoAsync(CancellationToken.None);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+            var info = await FetchLatestReleaseAsync(timeout.Token);
+            Volatile.Write(ref latestRelease, info);
             return Program.Settings.LatestVersion = info.Version;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error in CheckUpdate: {ex.Message}");
             return "";
+        }
+    }
+
+    /// <summary>
+    /// Checks for a new release shortly after startup and then periodically, so the Settings
+    /// page can offer an update without anyone having to go looking for one.
+    /// </summary>
+    public void StartBackgroundChecks()
+    {
+        if (backgroundCheckTask != null) { return; }
+
+        backgroundCheckCts = new CancellationTokenSource();
+        CancellationToken token = backgroundCheckCts.Token;
+        backgroundCheckTask = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(BackgroundCheckDelay, token);
+                while (!token.IsCancellationRequested)
+                {
+                    await CheckUpdateAsync();
+                    await Task.Delay(BackgroundCheckInterval, token);
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
+
+    public async Task StopBackgroundChecksAsync()
+    {
+        backgroundCheckCts?.Cancel();
+        if (backgroundCheckTask != null)
+        {
+            try { await backgroundCheckTask; } catch (OperationCanceledException) { }
         }
     }
 
@@ -163,23 +221,91 @@ public class Installer
 
         updateProgress = 0;
         updateError = "";
+        updatePhase = CheckingPhase;
         Console.WriteLine("Update triggered");
         updateTask = Task.Run(InstallUpdateAsync);
     }
 
-    private static async Task<(string Version, Uri Url, byte[] Hash)> ReadUpdateInfoAsync(CancellationToken token)
+    private const string CheckingPhase = "Checking for the latest release";
+    private const string DownloadingPhase = "Downloading";
+    private const string SystemUpgradePhase = "Updating the Pi's system software (this can take a while)";
+    private const string InstallingPhase = "Installing";
+    private const string RestartingPhase = "Restarting";
+
+    private static HttpClient CreateHttpClient()
     {
-        string[] fields = (await http.GetStringAsync(VersionUrl, token)).Split('@', StringSplitOptions.TrimEntries);
-        if (fields.Length != 3 || !Version.TryParse(fields[0], out _) ||
-            !Uri.TryCreate(fields[1], UriKind.Absolute, out Uri? url) ||
-            (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
+        var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        // GitHub's API refuses requests without a User-Agent
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"rt4k_pi/{SanitizeUserAgentVersion(Program.VERSION)}");
+        return client;
+    }
+
+    private static string SanitizeUserAgentVersion(string version)
+        => new(version.Where(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-').ToArray());
+
+    private static async Task<ReleaseInfo> FetchLatestReleaseAsync(CancellationToken token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseUrl);
+        request.Headers.Accept.ParseAdd("application/vnd.github+json");
+        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+        using var response = await http.SendAsync(request, token);
+        response.EnsureSuccessStatusCode();
+
+        using var stream = await response.Content.ReadAsStreamAsync(token);
+        var release = await System.Text.Json.JsonSerializer.DeserializeAsync(stream, UpdateJsonContext.Default.GitHubRelease, token)
+            ?? throw new InvalidDataException("Empty release metadata.");
+
+        if (release.Draft || release.Prerelease)
         {
-            throw new InvalidDataException("Invalid update metadata.");
+            throw new InvalidDataException("Latest release is not a stable release.");
         }
 
-        byte[] hash = Convert.FromHexString(fields[2]);
-        if (hash.Length != 32) { throw new InvalidDataException("Invalid update SHA-256."); }
-        return (fields[0], url, hash);
+        string version = (release.TagName ?? "").TrimStart('v', 'V');
+        if (!SemVer.TryParse(version, out _, out string[] prerelease) || prerelease.Length != 0)
+        {
+            throw new InvalidDataException($"Invalid release tag '{release.TagName}'.");
+        }
+
+        Uri executableUrl = FindAsset(release, ExecutableAsset);
+        Uri hashUrl = FindAsset(release, HashAsset);
+
+        string notes = (release.Body ?? "").Replace("\r\n", "\n").Trim();
+        if (notes.Length > MaxReleaseNotesLength)
+        {
+            notes = notes[..MaxReleaseNotesLength] + "\n\u2026";
+        }
+
+        string? pageUrl = Uri.TryCreate(release.HtmlUrl, UriKind.Absolute, out Uri? page) && page.Scheme == Uri.UriSchemeHttps
+            ? page.AbsoluteUri
+            : null;
+
+        return new ReleaseInfo(version, notes, pageUrl, executableUrl, hashUrl);
+    }
+
+    private static Uri FindAsset(GitHubRelease release, string name)
+    {
+        string? url = release.Assets?.FirstOrDefault(a => a.Name == name)?.BrowserDownloadUrl;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidDataException($"Release is missing {name}.");
+        }
+        return uri;
+    }
+
+    private static async Task<byte[]> DownloadExpectedHashAsync(Uri url, CancellationToken token)
+    {
+        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is > 4096) { throw new InvalidDataException("Invalid SHA-256 file."); }
+
+        // sha256sum format: "<hex>  rt4k_pi"
+        string text = await response.Content.ReadAsStringAsync(token);
+        string hex = text.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+        byte[] hash;
+        try { hash = Convert.FromHexString(hex); }
+        catch (FormatException) { throw new InvalidDataException("Invalid SHA-256 file."); }
+        if (hash.Length != 32) { throw new InvalidDataException("Invalid SHA-256 file."); }
+        return hash;
     }
 
     private async Task DownloadUpdateAsync(string archive, Uri url, byte[] expectedHash, CancellationToken token)
@@ -223,19 +349,24 @@ public class Installer
         try
         {
             Directory.CreateDirectory(directory);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-            var info = await ReadUpdateInfoAsync(timeout.Token);
-            string archive = Path.Combine(directory, "update.7z");
-            await DownloadUpdateAsync(archive, info.Url, info.Hash, timeout.Token);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(15));
+            var info = await FetchLatestReleaseAsync(timeout.Token);
+            Volatile.Write(ref latestRelease, info);
+            Program.Settings.LatestVersion = info.Version;
+            if (SemVer.Compare(info.Version, Program.VERSION) <= 0)
+            {
+                throw new InvalidOperationException("Already up to date.");
+            }
 
-            string extracted = Path.Combine(directory, "files");
-            Directory.CreateDirectory(extracted);
-            Util.RunCommand("7zr", $"x -y -o\"{extracted}\" \"{archive}\"");
-            string staged = Path.Combine(extracted, "rt4k_pi");
+            updatePhase = DownloadingPhase;
+            byte[] expectedHash = await DownloadExpectedHashAsync(info.HashUrl, timeout.Token);
+            string staged = Path.Combine(directory, ExecutableAsset);
+            await DownloadUpdateAsync(staged, info.ExecutableUrl, expectedHash, timeout.Token);
+
             var file = new FileInfo(staged);
             if (!file.Exists || file.LinkTarget != null || file.Length < 64 || file.Length > MaxUpdateSize)
             {
-                throw new InvalidDataException("Archive must contain a regular rt4k_pi executable.");
+                throw new InvalidDataException("Download is not a regular rt4k_pi executable.");
             }
 
             using (var stream = new FileStream(staged, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
@@ -249,6 +380,12 @@ public class Installer
                 }
                 stream.Flush(flushToDisk: true);
             }
+
+            // System packages first: if they fail, the running version is left untouched
+            updatePhase = SystemUpgradePhase;
+            UpgradeSystemPackages();
+
+            updatePhase = InstallingPhase;
             File.SetUnixFileMode(staged, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
                 UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
             File.Copy(executable, backup, overwrite: true);
@@ -256,6 +393,8 @@ public class Installer
             replaced = true;
             Directory.Delete(directory, recursive: true);
             updateProgress = 100;
+            updatePhase = RestartingPhase;
+            Console.WriteLine($"Installed rt4k_pi {info.Version}, restarting");
             DoInstall();
         }
         catch (Exception ex)
@@ -279,6 +418,30 @@ public class Installer
     {
         updateError = error;
         updateProgress = 0;
+        updatePhase = "";
+    }
+
+    /// <summary>
+    /// Brings the Pi's packages up to date, so an existing install ends up on the same footing
+    /// as a fresh one. Never prompts: config files the user changed are kept as they are.
+    /// </summary>
+    private static void UpgradeSystemPackages()
+    {
+        const string env = "env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a";
+        const string options = "-o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold";
+        try
+        {
+            Console.WriteLine("Updating system packages");
+            Util.RunElevated($"{env} dpkg --configure -a", SystemUpgradeTimeoutMs);
+            Util.RunElevated($"{env} apt-get {options} update", PackageTimeoutMs);
+            Util.RunElevated($"{env} apt-get {options} -y full-upgrade", SystemUpgradeTimeoutMs);
+            Console.WriteLine(RebootRequired ? "System packages updated; a reboot is required" : "System packages updated");
+        }
+        catch (Exception ex) when (ex.Message.Contains("get lock", StringComparison.OrdinalIgnoreCase) ||
+                                   ex.Message.Contains("frontend lock", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The Pi is busy installing other system updates. Try again in a few minutes.", ex);
+        }
     }
 
     public bool IsKsmbdInstalled()

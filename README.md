@@ -16,16 +16,14 @@ Incomplete installation instructions can be found at: https://github.com/Guspaz/
 
 The missing instructions are basically, use SSH/SCP to copy the rt4k_pi binary over to the /home/pi folder (assuming you used "pi" as the username) and run it, it will handle the rest of the install/config/setup itself.
 
-### CI builds
+### Downloading rt4k_pi
 
-Development builds are available for Raspberry Pi OS Lite **64-bit, Bookworm (Debian 12) or newer**. They contain a single executable and do not require installing .NET on the Pi. These are not stable releases.
+Releases are for Raspberry Pi OS Lite **64-bit, Bookworm (Debian 12) or newer**. They contain a single executable and do not require installing .NET on the Pi.
 
-1. Sign in to GitHub and open this repository's **Actions** tab.
-2. Select **CI**, then a successful run for the branch or commit you want (normally `master`).
-3. Download the **rt4k_pi-linux-arm64** artifact and unzip it. The ZIP contains only `rt4k_pi`.
-4. Copy `rt4k_pi` to a separate folder on the Pi, then run `chmod +x rt4k_pi` in that folder. GitHub's ZIP does not preserve executable permissions. Follow the setup instructions above for a new installation.
+1. Open this repository's [Releases](https://github.com/Guspaz/rt4k_pi/releases) page and download `rt4k_pi` from the latest release.
+2. Copy `rt4k_pi` to a separate folder on the Pi, then run `chmod +x rt4k_pi` in that folder. Follow the setup instructions above for a new installation.
 
-Artifacts are kept for 30 days. Downloading a CI build does not install it or enable automatic updates.
+Once installed, rt4k_pi updates itself from the Settings page.
 
 ## Serial TCP service
 
@@ -44,7 +42,12 @@ The network share lets you access files on the RT4K's SD card, with these limita
 
 ## Application updates
 
-Only one update can run at a time. Application updates preserve your settings and require enough free space to download and unpack the update. Downloads are limited to 256 MiB.
+rt4k_pi checks for new releases in the background. When one is available, **Settings** shows what's new and an **Install** button. You can also select **Check for updates** at any time.
+
+- Installing an update also updates the Pi's system software, so it can take several minutes. Keep the Pi powered until the page reloads.
+- If the system software update fails, the current version of rt4k_pi is left in place.
+- If Settings says the Pi needs to restart, some system updates will finish the next time it restarts.
+- Only one update can run at a time, and not while an RT4K firmware update is running. Updates preserve your settings. Downloads are limited to 256 MiB.
 
 If the application will not start after an update, you can restore the previous version over SSH: stop the rt4k_pi service, replace `rt4k_pi` with the saved `rt4k_pi.previous` file in the same folder, and restart the service.
 

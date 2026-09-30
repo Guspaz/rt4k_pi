@@ -51,7 +51,12 @@
 
 <div class='w3-panel'>
     <table class='w3-table-all w3-card' style='max-width: 700px;'>
-        <tr><th style="width: 25%;">rt4k_pi</th><td>v@(rt4k_pi.Program.VERSION)</td></tr>
+        <tr><th style="width: 25%;">rt4k_pi</th><td>v@(rt4k_pi.Program.VERSION)
+            @if (Installer.UpdateAvailable && Installer.LatestRelease is { } piUpdate)
+            {
+                <a href="/Settings" class="w3-small w3-tag w3-blue w3-round" title="rt4k_pi @(piUpdate.Version) is available">Update available</a>
+            }
+        </td></tr>
         <tr><th>Runtime</th><td>@System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription</td></tr>
         <tr><th>@rt4k_pi.RT4K.DisplayName Connection</th><td>@(Model.Serial?.IsConnected == true ? "Connected" : "Disconnected")</td></tr>
         <tr><th>IP Address</th><td>@localIP</td></tr>

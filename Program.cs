@@ -10,13 +10,15 @@
 
 namespace rt4k_pi;
 
+using System.Reflection;
 using System.Runtime.InteropServices;
 using FuseDotNet;
 using rt4k_pi.Filesystem;
 
 public partial class Program
 {
-    public static readonly string VERSION = "2.0";
+    public static readonly string VERSION =
+        typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0-dev";
 
     public static Serial? Serial { get; private set; }
     public static RT4K? RT4K { get; private set; }
@@ -101,6 +103,7 @@ public partial class Program
         RT4K = new RT4K(Serial);
         Ser2net = new Ser2net(Serial, 2000);
         Settings.Ser2netChanged += ApplySer2netSetting;
+        Installer.StartBackgroundChecks();
 
         try
         {
@@ -140,6 +143,7 @@ public partial class Program
             return shutdownTask ??= Task.Run(async () =>
             {
                 Interlocked.Exchange(ref shuttingDown, 1);
+                Task updateChecksStopped = Installer.StopBackgroundChecksAsync();
                 if (Firmware != null)
                 {
                     try { await Firmware.StopAsync().WaitAsync(TimeSpan.FromSeconds(2)); }
@@ -164,7 +168,7 @@ public partial class Program
                     }
                     finally
                     {
-                        await Task.WhenAll(tcpStopped, deviceStopped);
+                        await Task.WhenAll(tcpStopped, deviceStopped, updateChecksStopped);
                     }
                 }
             });
