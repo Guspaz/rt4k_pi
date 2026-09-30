@@ -329,14 +329,14 @@ try {
 	$binary = Join-Path $downloadDirectory 'rt4k_pi'
 	$hashFile = Join-Path $downloadDirectory 'rt4k_pi.sha256'
 	$downloadedFiles = @(Get-ChildItem -LiteralPath $downloadDirectory -Recurse -Force)
-	$expectedNames = @('rt4k_pi', 'rt4k_pi.sha256')
+	$expectedNames = @('rt4k_pi', 'rt4k_pi.gz', 'rt4k_pi.sha256')
 	$unexpected = @($downloadedFiles | Where-Object { $_.PSIsContainer -or $_.DirectoryName -ne (Get-Item -LiteralPath $downloadDirectory).FullName -or $expectedNames -cnotcontains $_.Name })
 	$missing = @($expectedNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $downloadDirectory $_) -PathType Leaf) })
 	if ($unexpected.Count -gt 0 -or $missing.Count -gt 0) {
 		$details = @()
 		if ($missing.Count -gt 0) { $details += "missing: $($missing -join ', ')" }
 		if ($unexpected.Count -gt 0) { $details += "unexpected: $(($unexpected | ForEach-Object { $_.Name }) -join ', ')" }
-		throw "The downloaded artifact must contain only rt4k_pi and rt4k_pi.sha256 ($($details -join '; '))."
+		throw "The downloaded artifact must contain only rt4k_pi, rt4k_pi.gz, and rt4k_pi.sha256 ($($details -join '; '))."
 	}
 	$expectedHash = ((Get-Content -LiteralPath $hashFile -Raw).Trim() -split '\s+')[0]
 	if ($expectedHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'rt4k_pi.sha256 does not contain a valid SHA-256.' }
