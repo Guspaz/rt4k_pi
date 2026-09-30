@@ -457,8 +457,10 @@ public class Installer
             Util.RunElevated($"{env} dpkg --configure -a", SystemUpgradeTimeoutMs);
             Util.RunElevated($"{env} apt-get {options} update", PackageTimeoutMs);
 
-            string plan = Util.RunElevated($"{env} apt-get {options} -s full-upgrade", PackageTimeoutMs);
-            int packages = plan.Split('\n').Count(line => line.StartsWith("Inst ", StringComparison.Ordinal));
+            // Much faster than a simulated full-upgrade on a Pi, which resolves every dependency
+            // just to tell us there's nothing to do. Only used for the count and the no-op check.
+            string plan = Util.RunElevated("apt list --upgradable", PackageTimeoutMs);
+            int packages = plan.Split('\n').Count(line => line.Contains("[upgradable from:", StringComparison.Ordinal));
             if (packages == 0)
             {
                 systemUpgradeDetail = "already up to date (100%)";

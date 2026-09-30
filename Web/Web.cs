@@ -75,6 +75,7 @@ public partial class Program
         MapDeviceCommands(app);
         MapDeviceStreams(app, appState);
         MapFirmware(app);
+        MapProfiles(app);
 
         Console.WriteLine("rt4k_pi startup complete.");
         app.Run();
@@ -86,6 +87,7 @@ public partial class Program
         app.MapGet("/RemoteOSD", () => Results.RazorSlice<Slices.RemoteOSD, Slices.AppState>(appState));
         app.MapGet("/Calculator", () => Results.RazorSlice<Slices.Calculator, Slices.AppState>(appState));
         app.MapGet("/Settings", () => Results.RazorSlice<Slices.Settings, Slices.AppState>(appState));
+        app.MapGet("/Profiles", () => Results.RazorSlice<Slices.Profiles, Slices.AppState>(appState));
         app.MapGet("/Firmware", () => Results.RazorSlice<Slices.Firmware, Slices.AppState>(appState));
         app.MapGet("/DebugLog", () => Results.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
     }

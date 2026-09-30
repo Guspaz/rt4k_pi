@@ -1,0 +1,281 @@
+@inherits RazorSlice<AppState>
+@implements IUsesLayout<_Layout, LayoutModel>
+
+@functions {
+	public LayoutModel LayoutModel => new() { Title = "Profiles" };
+}
+
+<div class="w3-panel">
+	<p>Click a folder to open it. Click <b>Load</b> to switch the @rt4k_pi.RT4K.DisplayName to a profile right away.</p>
+	<p>
+		<b>Folder:</b> <span id="breadcrumbs"></span>
+	</p>
+	<p>
+		<button class="@LayoutModel.ButtonClasses" id="newFolder" type="button">New folder</button>
+		<button class="@LayoutModel.ButtonClasses" id="refreshProfiles" type="button">Refresh</button>
+	</p>
+	<p id="profilesMessage" role="status" aria-live="polite"></p>
+	<p id="profilesError" class="w3-text-red" role="alert" hidden></p>
+	<table class="w3-table-all w3-card" style="max-width: 900px;">
+		<thead>
+			<tr><th>Name</th><th style="width: 1%; white-space: nowrap;"></th></tr>
+		</thead>
+		<tbody id="profileRows">
+			<tr><td colspan="2">Loading...</td></tr>
+		</tbody>
+	</table>
+</div>
+
+<dialog id="moveDialog" class="w3-card-4" style="border: none; padding: 16px; min-width: 320px;">
+	<p><b>Move <span id="moveName"></span> to:</b></p>
+	<p><select id="moveTarget" class="w3-select w3-border"></select></p>
+	<p>
+		<button class="@LayoutModel.ButtonClasses" id="moveConfirm" type="button">Move</button>
+		<button class="@LayoutModel.ButtonClasses" id="moveCancel" type="button">Cancel</button>
+	</p>
+</dialog>
+
+<noscript><p class="w3-text-red">JavaScript is required to manage profiles.</p></noscript>
+
+<script>
+	const buttonClasses = "@LayoutModel.ButtonClasses";
+	let currentPath = new URLSearchParams(location.search).get("path") || "";
+	let busy = false;
+
+	const rows = document.getElementById("profileRows");
+	const message = document.getElementById("profilesMessage");
+	const errorBox = document.getElementById("profilesError");
+
+	function join(folder, name) { return folder ? folder + "/" + name : name; }
+
+	function showError(text) {
+		errorBox.textContent = text;
+		errorBox.hidden = !text;
+	}
+
+	async function request(method, url) {
+		const response = await fetch(url, { method, headers: method === "POST" ? { "X-RT4K-Firmware": "1" } : {} });
+		if (!response.ok) {
+			throw new Error((await response.text()) || "Request failed (" + response.status + ")");
+		}
+		return response;
+	}
+
+	async function act(text, url) {
+		if (busy) { return; }
+		busy = true;
+		showError("");
+		message.textContent = text;
+		try {
+			await request("POST", url);
+			message.textContent = "";
+			return true;
+		}
+		catch (error) {
+			message.textContent = "";
+			showError(error.message);
+			return false;
+		}
+		finally {
+			busy = false;
+		}
+	}
+
+	function button(label, onClick) {
+		const b = document.createElement("button");
+		b.type = "button";
+		b.className = buttonClasses;
+		b.textContent = label;
+		b.style.marginLeft = "4px";
+		b.addEventListener("click", onClick);
+		return b;
+	}
+
+	function renderBreadcrumbs() {
+		const crumbs = document.getElementById("breadcrumbs");
+		crumbs.replaceChildren();
+		const parts = currentPath ? currentPath.split("/") : [];
+		const addCrumb = (label, path, last) => {
+			if (last) {
+				const b = document.createElement("b");
+				b.textContent = label;
+				crumbs.append(b);
+			} else {
+				const a = document.createElement("a");
+				a.href = "#";
+				a.textContent = label;
+				a.addEventListener("click", e => { e.preventDefault(); navigate(path); });
+				crumbs.append(a, " / ");
+			}
+		};
+		addCrumb("Profiles", "", parts.length === 0);
+		parts.forEach((part, i) => addCrumb(part, parts.slice(0, i + 1).join("/"), i === parts.length - 1));
+	}
+
+	function navigate(path) {
+		currentPath = path;
+		history.replaceState(null, "", path ? "?path=" + encodeURIComponent(path) : location.pathname);
+		load();
+	}
+
+	async function load() {
+		renderBreadcrumbs();
+		showError("");
+		rows.innerHTML = "<tr><td colspan='2'>Loading...</td></tr>";
+		try {
+			const response = await request("GET", "/Profiles/list?path=" + encodeURIComponent(currentPath));
+			render(await response.json());
+		}
+		catch (error) {
+			rows.replaceChildren();
+			showError(error.message);
+			if (currentPath) {
+				const tr = rows.insertRow();
+				const td = tr.insertCell();
+				td.colSpan = 2;
+				td.append(button("Back to Profiles", () => navigate("")));
+			}
+		}
+	}
+
+	function render(listing) {
+		rows.replaceChildren();
+
+		if (currentPath) {
+			const tr = rows.insertRow();
+			const td = tr.insertCell();
+			td.colSpan = 2;
+			const a = document.createElement("a");
+			a.href = "#";
+			a.textContent = "\u2191 Up one folder";
+			const parent = currentPath.includes("/") ? currentPath.slice(0, currentPath.lastIndexOf("/")) : "";
+			a.addEventListener("click", e => { e.preventDefault(); navigate(parent); });
+			td.append(a);
+		}
+
+		if (listing.entries.length === 0) {
+			const td = rows.insertRow().insertCell();
+			td.colSpan = 2;
+			td.textContent = "This folder is empty.";
+		}
+
+		for (const entry of listing.entries) {
+			const path = join(currentPath, entry.name);
+			const tr = rows.insertRow();
+			const nameCell = tr.insertCell();
+			const actions = tr.insertCell();
+			actions.style.whiteSpace = "nowrap";
+
+			if (entry.isDirectory) {
+				const a = document.createElement("a");
+				a.href = "#";
+				a.textContent = "\uD83D\uDCC1 " + entry.name;
+				a.addEventListener("click", e => { e.preventDefault(); navigate(path); });
+				nameCell.append(a);
+			} else {
+				nameCell.textContent = entry.name;
+				if (listing.loaded && listing.loaded.toLowerCase() === path.toLowerCase()) {
+					const tag = document.createElement("span");
+					tag.className = "w3-tag w3-round w3-green w3-small";
+					tag.style.marginLeft = "8px";
+					tag.textContent = "Loaded";
+					nameCell.append(tag);
+				}
+				if (entry.name.toLowerCase().endsWith(".rt4")) {
+					actions.append(button("Load", () => loadProfile(path, entry.name)));
+				}
+			}
+
+			actions.append(
+				button("Rename", () => rename(path, entry)),
+				button("Move", () => move(path, entry.name)),
+				button("Delete", () => remove(path, entry)));
+		}
+
+		if (listing.truncated) {
+			const td = rows.insertRow().insertCell();
+			td.colSpan = 2;
+			td.className = "w3-text-grey";
+			td.textContent = "This folder has too many items to show them all. Move some into subfolders.";
+		}
+	}
+
+	async function loadProfile(path, name) {
+		if (await act("Loading " + name + "...", "/Profiles/load?path=" + encodeURIComponent(path))) {
+			message.textContent = "Loaded " + name + ".";
+			setTimeout(load, 1000);
+		}
+	}
+
+	async function rename(path, entry) {
+		let name = prompt("New name for " + entry.name + ":", entry.name);
+		if (name === null || (name = name.trim()) === "" || name === entry.name) { return; }
+		if (!entry.isDirectory && entry.name.toLowerCase().endsWith(".rt4") && !name.toLowerCase().endsWith(".rt4")) {
+			name += ".rt4";
+		}
+		if (await act("Renaming...", "/Profiles/rename?path=" + encodeURIComponent(path) + "&name=" + encodeURIComponent(name))) {
+			load();
+		}
+	}
+
+	async function remove(path, entry) {
+		const what = entry.isDirectory ? "the folder " + entry.name + "? Only empty folders can be deleted." : entry.name + "? This can't be undone.";
+		if (!confirm("Delete " + what)) { return; }
+		if (await act("Deleting...", "/Profiles/delete?path=" + encodeURIComponent(path))) {
+			load();
+		}
+	}
+
+	async function move(path, name) {
+		if (busy) { return; }
+		showError("");
+		message.textContent = "Finding folders...";
+		let folders;
+		try {
+			folders = await (await request("GET", "/Profiles/folders")).json();
+		}
+		catch (error) {
+			message.textContent = "";
+			showError(error.message);
+			return;
+		}
+		message.textContent = "";
+
+		const select = document.getElementById("moveTarget");
+		select.replaceChildren();
+		for (const folder of folders) {
+			if (folder.toLowerCase() === path.toLowerCase() || folder.toLowerCase().startsWith(path.toLowerCase() + "/")) { continue; }
+			const option = document.createElement("option");
+			option.value = folder;
+			option.textContent = folder ? "Profiles / " + folder.split("/").join(" / ") : "Profiles (top level)";
+			option.selected = folder === currentPath;
+			select.append(option);
+		}
+		document.getElementById("moveName").textContent = name;
+
+		const dialog = document.getElementById("moveDialog");
+		dialog.onclose = async () => {
+			if (dialog.returnValue !== "move" || select.value === currentPath) { return; }
+			if (await act("Moving...", "/Profiles/move?path=" + encodeURIComponent(path) + "&to=" + encodeURIComponent(select.value))) {
+				load();
+			}
+		};
+		dialog.returnValue = "";
+		dialog.showModal();
+	}
+
+	document.getElementById("moveConfirm").addEventListener("click", () => document.getElementById("moveDialog").close("move"));
+	document.getElementById("moveCancel").addEventListener("click", () => document.getElementById("moveDialog").close());
+
+	document.getElementById("newFolder").addEventListener("click", async () => {
+		const name = prompt("Name for the new folder:");
+		if (name === null || name.trim() === "") { return; }
+		if (await act("Creating folder...", "/Profiles/mkdir?path=" + encodeURIComponent(currentPath) + "&name=" + encodeURIComponent(name.trim()))) {
+			load();
+		}
+	});
+
+	document.getElementById("refreshProfiles").addEventListener("click", load);
+
+	load();
+</script>
