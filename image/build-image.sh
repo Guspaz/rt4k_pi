@@ -123,7 +123,24 @@ ExecStart=/usr/local/sbin/rt4k-hostname
 WantedBy=sysinit.target
 EOF
 
-chroot "$root" systemctl enable rt4k.service rt4k-hostname.service
+# Host keys are removed below so every Pi gets its own; create them before sshd needs them
+cat > "$root/etc/systemd/system/rt4k-ssh-keys.service" <<EOF
+[Unit]
+Description=Generate SSH host keys
+DefaultDependencies=no
+After=local-fs.target
+Before=ssh.service ssh.socket sshd-keygen.service
+ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ssh-keygen -A
+
+[Install]
+WantedBy=sysinit.target
+EOF
+
+chroot "$root" systemctl enable rt4k.service rt4k-hostname.service rt4k-ssh-keys.service
 echo "$hostname" > "$root/etc/hostname"
 sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$hostname/" "$root/etc/hosts"
 
