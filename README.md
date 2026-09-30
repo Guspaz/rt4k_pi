@@ -12,7 +12,7 @@ Use rt4k_pi only on a trusted home network. Do not expose its web interface, fil
 
 ## Setup
 
-In short: in the Raspberry Pi Imager, set a custom content repository of `https://github.com/Guspaz/rt4k_pi/releases/latest/download/rt4k_pi.json`, choose "rt4k_pi", enter your Wi-Fi details, and boot the Pi.
+In short: in the Raspberry Pi Imager, set a custom content repository of `https://raw.githubusercontent.com/Guspaz/rt4k_pi/imager/rt4k_pi.json`, choose "rt4k_pi", enter your Wi-Fi details, and boot the Pi.
 
 ### Installing on an existing Pi
 

@@ -206,3 +206,20 @@ jobs:
           --title "$GITHUB_REF_NAME"
           --notes-from-tag
           --verify-tag
+
+      # Raspberry Pi Imager needs a fixed URL for its content repository, and release download
+      # links redirect to one-time signed URLs, so keep the current file on the imager branch
+      - name: Publish Imager repository file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          content="$(base64 -w0 release/rt4k_pi.json)"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/rt4k_pi.json?ref=imager" --jq .sha 2>/dev/null || true)"
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/imager" >/dev/null 2>&1; then
+            empty_tree="$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/trees" -f 'tree[][path]=README.md' -f 'tree[][mode]=100644' -f 'tree[][type]=blob' -f 'tree[][content]=Raspberry Pi Imager repository file for rt4k_pi. Updated automatically by releases.' --jq .sha)"
+            commit="$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/commits" -f message='Create imager branch' -f tree="$empty_tree" --jq .sha)"
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/heads/imager -f sha="$commit" >/dev/null
+          fi
+          args=(-X PUT "repos/$GITHUB_REPOSITORY/contents/rt4k_pi.json" -f branch=imager -f message="Imager repository for $GITHUB_REF_NAME" -f content="$content")
+          [[ -n "$sha" ]] && args+=(-f sha="$sha")
+          gh api "${args[@]}" >/dev/null

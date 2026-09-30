@@ -18,9 +18,9 @@
 
 1. Open the Imager's "App Options" (the gear/settings button), choose "Content Repository" → "Use custom URL", and enter:
 
-   `https://github.com/Guspaz/rt4k_pi/releases/latest/download/rt4k_pi.json`
+   `https://raw.githubusercontent.com/Guspaz/rt4k_pi/imager/rt4k_pi.json`
 
-   If your Imager doesn't have that option, start it from a command prompt instead: `rpi-imager --repo https://github.com/Guspaz/rt4k_pi/releases/latest/download/rt4k_pi.json`
+   If your Imager doesn't have that option, start it from a command prompt instead: `rpi-imager --repo https://raw.githubusercontent.com/Guspaz/rt4k_pi/imager/rt4k_pi.json`
 
 1. Select the device type "Raspberry Pi Zero 2 W"
 
