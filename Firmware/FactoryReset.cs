@@ -215,7 +215,8 @@ public sealed class FactoryReset
                 }
 
                 hasher = new SdCardSync.PiHasher(zipPath, image);
-                hashing = hasher.RunAsync(piCancel.Token);
+                // Firmware 1.80.0+ takes uploads without a hash, so there is nothing for the Pi to compute
+                if (!serial.SupportsUnhashedTransfers) { hashing = hasher.RunAsync(piCancel.Token); }
                 Update("Checking", "Comparing the files on the RT4K with the official SD card.");
                 var reporter = new SdSyncReporter
                 {

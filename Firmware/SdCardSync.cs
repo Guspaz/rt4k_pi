@@ -221,6 +221,26 @@ public static class SdCardSync
         return true;
     }
 
+    // Unhashed reads outrun the RT4K's own sha256, so whole-file checks just download and compare
+    private const int CompareChunkBytes = 1024 * 1024;
+
+    private static bool FullMatch(SerialFs fs, string devicePath, ZipArchiveEntry entry, long size, CancellationToken token)
+    {
+        using var stream = entry.Open();
+        byte[] expected = new byte[(int)Math.Min(CompareChunkBytes, size)];
+        for (long offset = 0; offset < size; offset += expected.Length)
+        {
+            token.ThrowIfCancellationRequested();
+            int length = (int)Math.Min(expected.Length, size - offset);
+            stream.ReadExactly(expected, 0, length);
+            byte[] actual;
+            try { actual = fs.Read(devicePath, offset, length); }
+            catch (SerialException) { return false; }
+            if (!actual.AsSpan().SequenceEqual(expected.AsSpan(0, length))) { return false; }
+        }
+        return true;
+    }
+
     /// <summary>Compares the card with the image, checking same-size files on the device. Never changes the card.</summary>
     public static async Task<SdSyncPlan> PlanAsync(SerialFs fs, SdDeviceTree tree, SdImage image, PiHasher hasher, SdSyncReporter reporter, bool fastChecks, CancellationToken token)
     {
@@ -254,9 +274,6 @@ public static class SdCardSync
         reporter.Hashing?.Invoke(0, hashTotal);
         int index = 0;
         var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        // The RT4K is the bottleneck, so it never waits on the Pi: device hashes are collected
-        // first and compared once the Pi's are ready (normally long before the RT4K finishes).
-        var deviceHashes = new List<(string Path, string? Hash)>(candidates.Count);
         using var zip = ZipFile.OpenRead(hasher.ZipPath);
         var entries = zip.Entries.ToDictionary(e => e.FullName, StringComparer.Ordinal);
         foreach (var file in candidates)
@@ -266,17 +283,12 @@ public static class SdCardSync
             string devicePath = tree.Files[file.Path].Path;
             reporter.Item?.Invoke($"({index} of {candidates.Count}) Checking {file.Path}");
             var ranges = fastChecks ? QuickCheckRanges(file) : null;
-            if (ranges != null)
-            {
-                if (QuickMatch(fs, devicePath, entries[file.EntryName], ranges)) { matched.Add(file.Path); }
-            }
-            else { deviceHashes.Add((file.Path, fs.Sha256(devicePath, file.Size, token))); }
+            bool same = ranges != null
+                ? QuickMatch(fs, devicePath, entries[file.EntryName], ranges)
+                : FullMatch(fs, devicePath, entries[file.EntryName], file.Size, token);
+            if (same) { matched.Add(file.Path); }
             hashed += file.Size;
             reporter.Hashing?.Invoke(hashed, hashTotal);
-        }
-        foreach (var (path, deviceHash) in deviceHashes)
-        {
-            if (deviceHash != null && deviceHash == await hasher.HashAsync(path, token)) { matched.Add(path); }
         }
 
         foreach (var file in image.Files.Values)
@@ -368,7 +380,7 @@ public static class SdCardSync
         foreach (var file in plan.Uploads)
         {
             reporter.Item?.Invoke("Uploading " + file.Path);
-            string hash = await hasher.HashAsync(file.Path, token);
+            string hash = serial.SupportsUnhashedTransfers ? "-" : await hasher.HashAsync(file.Path, token);
             var entry = zip.GetEntry(file.EntryName) ?? throw new InvalidDataException("The SD card image changed while it was being installed.");
             long before = done;
             await using (var stream = entry.Open())

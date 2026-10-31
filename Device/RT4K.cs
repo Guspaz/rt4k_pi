@@ -318,6 +318,7 @@ public class RT4K
             }
 
             Status = fields;
+            serial.FirmwareVersion = Firmware;
 
             // Remembered across restarts so the UI isn't stuck on the generic name until the
             // first poll of the next run lands. Unknown ids are skipped: caching "Unknown (5)"
@@ -610,19 +611,56 @@ public class RT4K
             double echoTripMs = echoSeconds * 1000 / echoRounds;
             Console.WriteLine($"Benchmark: echo {echoRate:F1} KB/s both ways ({echoTripMs:F2} ms per {probe.Length} byte round trip)");
 
-            Console.WriteLine($"Benchmark: writing {sent.Length / 1024} KB to /{path}...");
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            await serial.PutFileAsync(path, sent, token: token);
-            double writeSeconds = timer.Elapsed.TotalSeconds;
+            // Each transfer is bracketed by "loop" (inside one exclusive session so a status poll
+            // can't reset the window) to compare superloop cost with and without device hashing.
+            async Task<(double Seconds, string Loop)> TimedAsync(string label, Func<CancellationToken, Task> transfer)
+            {
+                Console.WriteLine($"Benchmark: {label} {sent.Length / 1024} KB at /{path}...");
+                double seconds = 0;
+                List<string> loop = [];
+                await serial.RunExclusiveAsync(async session =>
+                {
+                    await serial.SendCommandAsync("loop", line => line.StartsWith("top=") || line.StartsWith("loop:"), 2000, token: session);
+                    var transferTimer = System.Diagnostics.Stopwatch.StartNew();
+                    await transfer(session);
+                    seconds = transferTimer.Elapsed.TotalSeconds;
+                    loop = await serial.SendCommandAsync("loop", line => line.StartsWith("top=") || line.StartsWith("loop:"), 2000, token: session);
+                }, token);
+                string stats = string.Join(", ", loop);
+                Console.WriteLine($"Benchmark: {label} {sent.Length / 1024 / seconds:F1} KB/s, superloop [{stats}]");
+                return (seconds, stats);
+            }
 
-            Console.WriteLine("Benchmark: reading it back...");
-            timer.Restart();
-            byte[] received = await serial.GetFileAsync(path, token: token);
-            double readSeconds = timer.Elapsed.TotalSeconds;
+            Task<(double Seconds, string Loop)> TimedPutAsync(bool hashed)
+                => TimedAsync(hashed ? "write (hashed)" : "write (unhashed)", session => serial.PutFileAsync(path, sent, token: session, hashed: hashed));
 
+            byte[] received = [];
+            Task<(double Seconds, string Loop)> TimedGetAsync(bool hashed)
+                => TimedAsync(hashed ? "read (hashed)" : "read (unhashed)", async session => received = await serial.GetFileAsync(path, token: session, hashed: hashed));
+
+            var (writeSeconds, hashedLoop) = await TimedPutAsync(hashed: true);
+            string writeStats = $"write (hashed) {sent.Length / 1024 / writeSeconds:F1} KB/s [superloop: {hashedLoop}]";
+            if (serial.SupportsUnhashedTransfers)
+            {
+                var (unhashedSeconds, unhashedLoop) = await TimedPutAsync(hashed: false);
+                writeStats += $", write (unhashed) {sent.Length / 1024 / unhashedSeconds:F1} KB/s [superloop: {unhashedLoop}]";
+            }
+            else
+            {
+                writeStats += $", unhashed transfers need firmware 1.80.0+ (have {Firmware ?? "unknown"})";
+            }
+
+            var (readSeconds, readLoop) = await TimedGetAsync(hashed: true);
             string verify = received.AsSpan().SequenceEqual(sent)
                 ? "data verified OK"
                 : $"DATA MISMATCH (sent {sent.Length} bytes, got {received.Length})";
+            string readStats = $"read (hashed) {received.Length / 1024 / readSeconds:F1} KB/s [superloop: {readLoop}]";
+            if (serial.SupportsUnhashedTransfers)
+            {
+                var (unhashedSeconds, unhashedLoop) = await TimedGetAsync(hashed: false);
+                if (!received.AsSpan().SequenceEqual(sent)) { verify += $", UNHASHED READ MISMATCH (got {received.Length} bytes)"; }
+                readStats += $", read (unhashed) {received.Length / 1024 / unhashedSeconds:F1} KB/s [superloop: {unhashedLoop}]";
+            }
 
             // Compare a device-side hash against downloading (streaming get) and hashing on the Pi.
             // "loop" brackets the hash to show superloop pass times while it runs; the session is
@@ -646,7 +684,7 @@ public class RT4K
             string loopStats = $"idle [{string.Join(", ", idleLines)}] during sha256 [{string.Join(", ", loopLines)}]";
             Console.WriteLine($"Benchmark: superloop during sha256: {loopStats}");
 
-            string result = $"{verify}, {shaVerify}, echo {echoRate:F1} KB/s, write {sent.Length / 1024 / writeSeconds:F1} KB/s, read {received.Length / 1024 / readSeconds:F1} KB/s, device sha256 {sent.Length / 1024 / shaSeconds:F1} KB/s (superloop: {loopStats})";
+            string result = $"{verify}, {shaVerify}, echo {echoRate:F1} KB/s, {writeStats}, {readStats}, device sha256 {sent.Length / 1024 / shaSeconds:F1} KB/s (superloop: {loopStats})";
             Console.WriteLine($"Benchmark: {result}");
             return result;
         }

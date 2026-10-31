@@ -1,4 +1,4 @@
-namespace rt4k_pi;
+﻿namespace rt4k_pi;
 
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
@@ -35,6 +35,24 @@ public class Serial : IAsyncDisposable
     private const int TrailingReplyMs = 50;
 
     public bool IsConnected => Volatile.Read(ref port) != null;
+
+    // Firmware 1.80.0+ accepts "-" in place of put's SHA-256 and "get -n", skipping the device-side hash
+    private static readonly Version UnhashedTransferVersion = new(1, 80, 0);
+
+    /// <summary>Firmware version from the most recent status poll; gates protocol features.</summary>
+    public string? FirmwareVersion { get; set; }
+
+    public bool SupportsUnhashedTransfers
+    {
+        get
+        {
+            string? version = FirmwareVersion;
+            if (version == null) { return false; }
+            int end = 0;
+            while (end < version.Length && (char.IsAsciiDigit(version[end]) || version[end] == '.')) { end++; }
+            return Version.TryParse(version[..end], out var parsed) && parsed >= UnhashedTransferVersion;
+        }
+    }
 
     private Stream? port;
     private readonly Lock readerLock = new();
@@ -815,6 +833,7 @@ public class Serial : IAsyncDisposable
         token = linked.Token;
         Stream connection = Volatile.Read(ref port) ?? throw new SerialException("Serial disconnected.");
         int putTimeoutMs = PutBaseTimeoutMs + (int)(length / PutBytesPerMs);
+        if (SupportsUnhashedTransfers) { sha256 = "-"; }
         await RunSessionAsync($"put {length} {sha256} {path}", "put", "put done", async ready =>
         {
             ushort nonce = ParseNonce(ready);
@@ -876,14 +895,16 @@ public class Serial : IAsyncDisposable
     /// Stream (or expose a chunked/ranged API) instead of materialising a byte[]. Needed before
     /// the FUSE/SMB layer can serve arbitrary files rather than small config blobs.
     /// </remarks>
-    public async Task<byte[]> GetFileAsync(string path, long offset = 0, long length = 0, bool quiet = false, CancellationToken token = default)
+    /// <param name="hashed">Forces whether the device hashes the stream; by default it is skipped when the firmware supports that.</param>
+    public async Task<byte[]> GetFileAsync(string path, long offset = 0, long length = 0, bool quiet = false, CancellationToken token = default, bool? hashed = null)
     {
-        string command = "get" + (offset > 0 ? $" -o {offset}" : "") + (length > 0 ? $" -l {length}" : "") + $" {path}";
+        bool verify = hashed ?? !SupportsUnhashedTransfers;
+        string command = "get" + (verify ? "" : " -n") + (offset > 0 ? $" -o {offset}" : "") + (length > 0 ? $" -l {length}" : "") + $" {path}";
 
         return await RunSessionAsync(command, "get", "get done", async ready =>
         {
             var fields = ParseFields(ready);
-            byte[] data = await ReceiveAsync(ParseNonce(ready), token);
+            byte[] data = await ReceiveAsync(ParseNonce(ready), token, verify);
 
             if (fields.TryGetValue("len", out string? len) && long.TryParse(len, out long expected) && data.Length != expected)
             {
@@ -971,9 +992,10 @@ public class Serial : IAsyncDisposable
     /// Uploads a file to the RT4K's SD card. The device writes to a temp file and atomically
     /// renames it once the declared size and SHA-256 both check out.
     /// </summary>
-    public async Task PutFileAsync(string path, byte[] data, bool quiet = false, CancellationToken token = default)
+    /// <param name="hashed">Forces whether the SHA-256 is sent; by default it is skipped when the firmware supports that.</param>
+    public async Task PutFileAsync(string path, byte[] data, bool quiet = false, CancellationToken token = default, bool? hashed = null)
     {
-        string sha = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+        string sha = hashed ?? !SupportsUnhashedTransfers ? Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant() : "-";
         string command = $"put {data.Length} {sha} {path}";
 
         // The device only says "put done" once it has taken the SD lock, received every frame
@@ -1105,7 +1127,8 @@ public class Serial : IAsyncDisposable
     }
 
     // Receives DATA frames until the terminal RESP frame, and verifies the SHA-256 it carries
-    private async Task<byte[]> ReceiveAsync(ushort nonce, CancellationToken token)
+    // unless the session was opened without device hashing ("get -n")
+    private async Task<byte[]> ReceiveAsync(ushort nonce, CancellationToken token, bool verify = true)
     {
         using var received = new MemoryStream();
         byte expectedSeq = 0;
@@ -1133,7 +1156,7 @@ public class Serial : IAsyncDisposable
                 case Rtl1Type.Resp:
                     byte[] data = received.ToArray();
 
-                    if (!SHA256.HashData(data).AsSpan().SequenceEqual(frame.Payload))
+                    if (verify && !SHA256.HashData(data).AsSpan().SequenceEqual(frame.Payload))
                     {
                         throw new SerialException("RTL1 transfer failed the SHA-256 check");
                     }
