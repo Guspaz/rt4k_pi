@@ -1,14 +1,14 @@
 {
   "os_list": [
     {
-      "name": "rt4k_pi v2.2.3",
+      "name": "rt4k_pi v2.3.0",
       "description": "Raspberry Pi OS Lite with rt4k_pi preinstalled (Raspberry Pi Zero 2 W)",
       "icon": "https://downloads.raspberrypi.com/raspios_armhf/Raspberry_Pi_OS_(32-bit).png",
-      "url": "https://github.com/Guspaz/rt4k_pi/releases/download/v2.2.3/rt4k_pi.img.xz",
-      "extract_size": 4672454656,
-      "extract_sha256": "f0c90f60e4501564bc73dfcb335d238d6f4a7c3f630c76245e6d51d1648b8b03",
-      "image_download_size": 779099892,
-      "release_date": "2026-09-30",
+      "url": "https://github.com/Guspaz/rt4k_pi/releases/download/v2.3.0/rt4k_pi.img.xz",
+      "extract_size": 4689231872,
+      "extract_sha256": "4444aad51c6dd59d40e749def877eaf9fa2bf03282e4515b28b5b00fbaf2872f",
+      "image_download_size": 724832188,
+      "release_date": "2026-10-31",
       "init_format": "cloudinit-rpi",
       "devices": ["pi3-64bit"]
     }
