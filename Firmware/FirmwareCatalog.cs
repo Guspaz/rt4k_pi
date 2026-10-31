@@ -111,10 +111,12 @@ public sealed class FirmwareCatalog(HttpClient http, TimeProvider? time = null)
         if (!hash.Equals(release.Sha256, StringComparison.OrdinalIgnoreCase)) { throw new InvalidDataException("Firmware ZIP SHA-256 does not match the official listing."); }
     }
 
-    public static async Task<FirmwareImage[]> SelectImagesAsync(ZipArchive zip, int model, string version, CancellationToken token)
+    public static async Task<FirmwareImage[]> SelectImagesAsync(ZipArchive zip, int model, string version, CancellationToken token, bool sdCardImage = false)
     {
         string prefix = model switch { 0 => "rt4k_", 1 => "rt4kce_", _ => throw new InvalidDataException("Only positively identified RT4K Pro and RT4K CE devices are supported.") };
-        if (zip.Entries.Count > 128 || zip.Entries.Sum(e => e.Length) > 128 * 1024 * 1024) { throw new InvalidDataException("Firmware archive is too large."); }
+        int maxEntries = sdCardImage ? 20000 : 128;
+        long maxBytes = sdCardImage ? 1024L * 1024 * 1024 : 128 * 1024 * 1024;
+        if (zip.Entries.Count > maxEntries || zip.Entries.Sum(e => e.Length) > maxBytes) { throw new InvalidDataException("Firmware archive is too large."); }
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in zip.Entries)
         {
@@ -124,7 +126,9 @@ public sealed class FirmwareCatalog(HttpClient http, TimeProvider? time = null)
         var bins = zip.Entries.Where(e => e.FullName.Equals("rt4kup.bin", StringComparison.OrdinalIgnoreCase)).ToArray();
         var rbfs = zip.Entries.Where(e => e.FullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && e.FullName.EndsWith(".rbf", StringComparison.OrdinalIgnoreCase) && !e.FullName.Contains('/')).ToArray();
         if (bins.Length != 1 || rbfs.Length != 1) { throw new InvalidDataException("The archive does not contain exactly one update binary and one FPGA image for this model."); }
-        if (!rbfs[0].FullName.Equals(prefix + version.Replace(".", "") + ".rbf", StringComparison.OrdinalIgnoreCase)) { throw new InvalidDataException("The FPGA filename does not match the selected firmware version."); }
+        // Official names are the version without dots, sometimes zero-padded (1.99.7 is rt4k_19970.rbf).
+        // The update binary's header below confirms the exact version.
+        if (!Regex.IsMatch(rbfs[0].FullName, @"\A" + Regex.Escape(prefix + version.Replace(".", "")) + @"[0-9]*\.rbf\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1))) { throw new InvalidDataException("The FPGA filename does not match the selected firmware version."); }
         var images = new List<FirmwareImage>();
         foreach (var entry in new[] { rbfs[0], bins[0] })
         {

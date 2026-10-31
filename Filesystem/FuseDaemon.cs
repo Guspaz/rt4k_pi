@@ -132,6 +132,17 @@ namespace rt4k_pi.Filesystem
             });
         }
 
+        /// <summary>Takes the SMB share down so nothing else touches the card during maintenance.</summary>
+        public void PauseShare() => StopShare();
+
+        /// <summary>Brings the SMB share back, but only if the mount behind it is serving.</summary>
+        public void ResumeShare()
+        {
+            if (Status != FuseStatus.Running) { return; }
+            try { Util.RunElevated("systemctl start ksmbd"); }
+            catch (Exception ex) { Console.WriteLine($"Failed to start the SMB share: {ex.Message}"); }
+        }
+
         private static void StopShare()
         {
             try

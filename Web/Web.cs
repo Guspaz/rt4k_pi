@@ -75,6 +75,7 @@ public partial class Program
         MapDeviceCommands(app);
         MapDeviceStreams(app, appState);
         MapFirmware(app);
+        MapFactoryReset(app);
         MapProfiles(app);
 
         Console.WriteLine("rt4k_pi startup complete.");
@@ -89,6 +90,7 @@ public partial class Program
         app.MapGet("/Settings", () => Results.RazorSlice<Slices.Settings, Slices.AppState>(appState));
         app.MapGet("/Profiles", () => Results.RazorSlice<Slices.Profiles, Slices.AppState>(appState));
         app.MapGet("/Firmware", () => Results.RazorSlice<Slices.Firmware, Slices.AppState>(appState));
+        app.MapGet("/FactoryReset", () => Results.RazorSlice<Slices.FactoryReset, Slices.AppState>(appState));
         app.MapGet("/DebugLog", () => Results.RazorSlice<Slices.DebugLog, Slices.AppState>(appState));
     }
 
@@ -100,7 +102,7 @@ public partial class Program
         {
             lock (updateStartLock)
             {
-                if (Firmware?.Status is { Active: true } or { NeedsRecovery: true })
+                if (Firmware?.Status is { Active: true } or { NeedsRecovery: true } || Reset?.Active == true)
                 {
                     return Results.Text("Finish RT4K firmware maintenance before updating rt4k_pi.", statusCode: 409);
                 }

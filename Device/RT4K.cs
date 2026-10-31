@@ -624,7 +624,29 @@ public class RT4K
                 ? "data verified OK"
                 : $"DATA MISMATCH (sent {sent.Length} bytes, got {received.Length})";
 
-            string result = $"{verify}, echo {echoRate:F1} KB/s, write {sent.Length / 1024 / writeSeconds:F1} KB/s, read {received.Length / 1024 / readSeconds:F1} KB/s";
+            // Compare a device-side hash against downloading (streaming get) and hashing on the Pi.
+            // "loop" brackets the hash to show superloop pass times while it runs; the session is
+            // exclusive so a background "status" poll can't reset the same timing window midway.
+            Console.WriteLine("Benchmark: hashing it on the device...");
+            List<string> shaLines = [], loopLines = [], idleLines = [];
+            double shaSeconds = 0;
+            await serial.RunExclusiveAsync(async session =>
+            {
+                // Idle baseline first, so the per-pass cost of hashing is the difference between the two
+                await serial.SendCommandAsync("loop", line => line.StartsWith("top=") || line.StartsWith("loop:"), 2000, token: session);
+                await Task.Delay(3000, session);
+                idleLines = await serial.SendCommandAsync("loop", line => line.StartsWith("top=") || line.StartsWith("loop:"), 2000, token: session);
+                var shaTimer = System.Diagnostics.Stopwatch.StartNew();
+                shaLines = await serial.SendCommandAsync($"sha256 {path}", line => line.StartsWith("sha256 ") || line.StartsWith("sha256:"), 120000, token: session);
+                shaSeconds = shaTimer.Elapsed.TotalSeconds;
+                loopLines = await serial.SendCommandAsync("loop", line => line.StartsWith("top=") || line.StartsWith("loop:"), 2000, token: session);
+            }, token);
+            string expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(sent)).ToLowerInvariant();
+            string shaVerify = shaLines.Any(l => l == "sha256 " + expected) ? "sha256 OK" : "SHA256 MISMATCH: " + string.Join("; ", shaLines);
+            string loopStats = $"idle [{string.Join(", ", idleLines)}] during sha256 [{string.Join(", ", loopLines)}]";
+            Console.WriteLine($"Benchmark: superloop during sha256: {loopStats}");
+
+            string result = $"{verify}, {shaVerify}, echo {echoRate:F1} KB/s, write {sent.Length / 1024 / writeSeconds:F1} KB/s, read {received.Length / 1024 / readSeconds:F1} KB/s, device sha256 {sent.Length / 1024 / shaSeconds:F1} KB/s (superloop: {loopStats})";
             Console.WriteLine($"Benchmark: {result}");
             return result;
         }

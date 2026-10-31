@@ -12,7 +12,7 @@ public partial class Program
         public long ConnectionRevision => serial.ConnectionRevision;
         public Task ExclusiveAsync(Func<CancellationToken, Task> action, CancellationToken token) => serial.RunExclusiveAsync(action, token);
         public Task<List<string>> CommandAsync(string command, Func<string, bool> terminal, int timeoutMs, CancellationToken token) => serial.SendCommandAsync(command, terminal, timeoutMs, token: token);
-        public Task UploadAsync(string path, Stream data, long length, string sha256, Action<long> progress, CancellationToken token) => serial.PutFirmwareFileAsync(path, data, length, sha256, progress, token);
+        public Task UploadAsync(string path, Stream data, long length, string sha256, Action<long> progress, CancellationToken token) => serial.PutStreamAsync(path, data, length, sha256, progress, token);
     }
 
     private static void MapFirmware(WebApplication app)
@@ -60,6 +60,7 @@ public partial class Program
                 lock (updateStartLock)
                 {
                     if (Installer.Updating) { return Results.Text("Wait for the rt4k_pi application update to finish.", statusCode: 409); }
+                    if (Reset?.Active == true) { return Results.Text("Wait for the factory reset to finish.", statusCode: 409); }
                     updater.Start(release);
                 }
                 return Results.Accepted();

@@ -1,0 +1,109 @@
+@inherits RazorSlice<AppState>
+@implements IUsesLayout<_Layout, LayoutModel>
+
+@functions {
+	public LayoutModel LayoutModel => new() { Title = "Factory Reset" };
+}
+
+<p style="max-width: 900px;">Puts the official SD card files back on the RT4K and installs firmware, so it's set up like new.</p>
+
+<div class="w3-panel w3-pale-yellow w3-border" style="max-width: 900px;" role="alert">
+	<p><strong>Warning: everything on the RT4K's SD card will be replaced</strong></p>
+	<p>Your own profiles, images and any other files on the card will be deleted. Nothing is kept or backed up.</p>
+	<p>Keep the Pi and RT4K powered on until it finishes. This can take a while.</p>
+</div>
+
+<div class="w3-panel">
+	<table class="w3-table-all w3-card" style="max-width: 900px;">
+		<tr><th style="width: 25%;">SD card files</th><td id="sdVersion">Loading...</td></tr>
+		<tr><th>Firmware</th><td>
+			<label><input type="radio" name="firmware" value="LatestExperimental" checked> Latest experimental <span id="experimentalVersion"></span></label><br>
+			<label><input type="radio" name="firmware" value="LatestStable"> Latest stable <span id="stableVersion"></span></label><br>
+			<label><input type="radio" name="firmware" value="FromImage"> The version included with the SD card files <span id="imageVersion"></span></label>
+		</td></tr>
+		<tr><th>Fast file checks</th><td>
+			<label><input type="checkbox" id="fastChecks" checked> Use fast file checks</label>
+			Saves time by taking a quick look at profiles and pictures instead of checking every part of them. Other files are always fully checked. A profile or picture with only a small difference could be missed.
+		</td></tr>
+		<tr><th>Confirm</th><td>
+			<label><input type="checkbox" id="confirmReset"> I understand that everything on the SD card will be replaced</label><br>
+			<button class="@LayoutModel.ButtonClasses" id="startReset" type="button" disabled>Start factory reset</button>
+		</td></tr>
+		<tr><th>Progress</th><td>
+			<strong id="resetPhase"></strong>
+			<div id="resetMessage" role="status" aria-live="polite">Connecting to the Pi...</div>
+			<progress id="resetProgress" max="100" value="0" style="width: 100%;" hidden></progress>
+			<div id="resetItem" class="w3-small"></div>
+			<button class="@LayoutModel.ButtonClasses" id="cancelReset" type="button" style="display: none;" disabled>Cancel</button>
+		</td></tr>
+	</table>
+	<p id="resetError" class="w3-text-red" role="alert" hidden></p>
+</div>
+<noscript><p class="w3-text-red">JavaScript is required for factory reset.</p></noscript>
+<script>
+(() => {
+	"use strict";
+	const el = id => document.getElementById(id);
+	let status = null, releasesReady = false, supported = {};
+	const headers = { "X-RT4K-Firmware": "1" };
+
+	function showError(message) { el("resetError").textContent = message || ""; el("resetError").hidden = !message; }
+
+	function update() {
+		const active = status?.active === true;
+		el("startReset").disabled = active || !releasesReady || !el("confirmReset").checked;
+		document.querySelectorAll("input[name=firmware]").forEach(r => r.disabled = active || !supported[r.value]);
+		el("confirmReset").disabled = active;
+		el("fastChecks").disabled = active;
+		const cancellable = active && status.canCancel;
+		el("cancelReset").disabled = !cancellable;
+		el("cancelReset").style.display = cancellable ? "" : "none";
+		if (!status) { return; }
+		el("resetPhase").textContent = status.phase === "Idle" ? "" : status.phase;
+		el("resetMessage").textContent = status.message;
+		el("resetItem").textContent = status.currentItem || "";
+		el("resetProgress").hidden = !active && status.percent === 0;
+		el("resetProgress").value = status.percent;
+		el("resetMessage").className = status.failed ? "w3-text-red" : "";
+	}
+
+	async function loadReleases() {
+		const response = await fetch("/FactoryReset/releases", { cache: "no-store" });
+		const data = await response.json();
+		if (data.error) { el("sdVersion").textContent = data.error; return; }
+		el("sdVersion").textContent = `${data.sdVersion} (${data.sdDate})`;
+		const label = (version, ok) => !version ? "(not found)" : ok ? `(${version})` : `(${version}, too old for rt4k_pi)`;
+		el("imageVersion").textContent = label(data.sdVersion, data.sdSupported);
+		el("stableVersion").textContent = label(data.stable, data.stableSupported);
+		el("experimentalVersion").textContent = label(data.experimental, data.experimentalSupported);
+		supported = { LatestExperimental: data.experimentalSupported, LatestStable: data.stableSupported, FromImage: data.sdSupported };
+		const current = document.querySelector("input[name=firmware]:checked");
+		if (!current || !supported[current.value]) {
+			const first = [...document.querySelectorAll("input[name=firmware]")].find(r => supported[r.value]);
+			if (current) { current.checked = false; }
+			if (first) { first.checked = true; }
+		}
+		releasesReady = Object.values(supported).some(v => v);
+		update();
+	}
+
+	el("confirmReset").addEventListener("change", update);
+	el("startReset").addEventListener("click", async () => {
+		showError("");
+		const firmware = document.querySelector("input[name=firmware]:checked").value;
+		const response = await fetch(`/FactoryReset/start?firmware=${firmware}&fastChecks=${el("fastChecks").checked}&confirmed=true`, { method: "POST", headers });
+		if (!response.ok) { showError(await response.text()); }
+		el("confirmReset").checked = false;
+		update();
+	});
+	el("cancelReset").addEventListener("click", async () => {
+		el("cancelReset").disabled = true;
+		const response = await fetch("/FactoryReset/cancel", { method: "POST", headers });
+		if (!response.ok) { showError(await response.text()); }
+	});
+
+	const events = new EventSource("/FactoryReset/stream");
+	events.onmessage = e => { status = JSON.parse(e.data); update(); };
+	loadReleases().catch(e => { el("sdVersion").textContent = "Could not load the official releases."; });
+})();
+</script>

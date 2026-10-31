@@ -122,7 +122,7 @@ public class SerialFs(Serial serial)
     /// <summary>Lists a directory. The path is in device form ("" for the card's root).</summary>
     public List<SerialFsEntry> List(string devicePath) => ListWithFlag(devicePath).Entries;
 
-    private (List<SerialFsEntry> Entries, bool Truncated) ListWithFlag(string devicePath)
+    public (List<SerialFsEntry> Entries, bool Truncated) ListWithFlag(string devicePath)
     {
         long generation;
 
@@ -265,6 +265,25 @@ public class SerialFs(Serial serial)
         Send("mv", $"mv -f {fromDevicePath}|{toDevicePath}", line => line == "mv ok" || line.StartsWith("mv err="), CommandTimeoutMs);
         InvalidatePath(fromDevicePath);
         InvalidatePath(toDevicePath);
+    }
+
+    // The device hashes 2048 bytes per superloop pass, measured at ~90 KB/s; assume about a third of that.
+    private const int Sha256BaseTimeoutMs = 15000;
+    private const double Sha256BytesPerMs = 30.0;
+
+    /// <summary>
+    /// Hashes a file on the device. Returns null if the device can't open or read it. The
+    /// command can't be aborted partway, so cancellation is only checked before it is sent.
+    /// </summary>
+    public string? Sha256(string devicePath, long size, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        int timeoutMs = Sha256BaseTimeoutMs + (int)Math.Min(int.MaxValue / 2, size / Sha256BytesPerMs);
+        List<string> lines = Send("sha256", $"sha256 {devicePath}", line => line.StartsWith("sha256 ") || line.StartsWith("sha256:"), timeoutMs);
+        string? reply = lines.FirstOrDefault(line => line.StartsWith("sha256 ") || line.StartsWith("sha256:"));
+        if (reply == null || reply.StartsWith("sha256 err") || reply.StartsWith("sha256:")) { return null; }
+        string hash = reply[7..].Trim();
+        return hash.Length == 64 && hash.All(Uri.IsHexDigit) ? hash.ToLowerInvariant() : null;
     }
 
     /// <summary>Reads a byte range out of a file on the card.</summary>

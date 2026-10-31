@@ -99,7 +99,12 @@ public sealed class FirmwareUpdater
 
     public (string? Version, string? Model) Current { get { lock (gate) { return (currentVersion, currentModel); } } }
 
-    public void Start(FirmwareRelease release)
+    public void Start(FirmwareRelease release) => Start(release, null);
+
+    /// <summary>Installs firmware from an already verified local archive (e.g. an official SD card image). Every other step is unchanged.</summary>
+    public void StartFromArchive(string zipPath, string version) => Start(new FirmwareRelease("archive-" + version, version, "", false, "", "", ""), Path.GetFullPath(zipPath));
+
+    private void Start(FirmwareRelease release, string? archive)
     {
         if (!IsSupportedVersion(release.Version))
         {
@@ -123,7 +128,7 @@ public sealed class FirmwareUpdater
             currentModel = null;
             bytes = 0;
             total = null;
-            worker = Task.Run(() => RunAsync(release, cancellation.Token));
+            worker = Task.Run(() => RunAsync(release, archive, cancellation.Token));
         }
     }
 
@@ -214,7 +219,7 @@ public sealed class FirmwareUpdater
     private void Progress(long done, long? length) { lock (gate) { bytes = done; total = length; } }
     private void DeleteDownload() => File.Delete(Path.Combine(directory, "download.zip"));
 
-    private async Task RunAsync(FirmwareRelease release, CancellationToken token)
+    private async Task RunAsync(FirmwareRelease release, string? archive, CancellationToken token)
     {
         try
         {
@@ -225,16 +230,18 @@ public sealed class FirmwareUpdater
                     var initial = await ReadDeviceAsync(sessionToken);
                     connection = device.ConnectionRevision;
                     Save(journal! with { Model = initial.Model, OriginalVersion = initial.Version });
-                    Phase("Downloading", "Downloading and verifying the official ZIP on the Pi.");
-                    DeleteDownload();
-                    using (var downloadTimeout = CancellationTokenSource.CreateLinkedTokenSource(sessionToken))
+                    string zipPath = archive ?? Path.Combine(directory, "download.zip");
+                    if (archive == null)
                     {
+                        Phase("Downloading", "Downloading and verifying the official ZIP on the Pi.");
+                        DeleteDownload();
+                        using var downloadTimeout = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
                         downloadTimeout.CancelAfter(TimeSpan.FromMinutes(15));
-                        await catalog.DownloadAsync(release, Path.Combine(directory, "download.zip"), Progress, downloadTimeout.Token);
+                        await catalog.DownloadAsync(release, zipPath, Progress, downloadTimeout.Token);
                     }
                     Phase("Validating", "Validating the archive and selecting only this model's firmware files.");
-                    using var zip = ZipFile.OpenRead(Path.Combine(directory, "download.zip"));
-                    FirmwareImage[] images = await FirmwareCatalog.SelectImagesAsync(zip, initial.Model, release.Version, sessionToken);
+                    using var zip = ZipFile.OpenRead(zipPath);
+                    FirmwareImage[] images = await FirmwareCatalog.SelectImagesAsync(zip, initial.Model, release.Version, sessionToken, archive != null);
                     FirmwareImage rbf = images[0], bin = images[1];
                     CheckConnection();
                     await RequireIdentityAsync(sessionToken);

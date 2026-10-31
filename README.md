@@ -6,7 +6,7 @@ This project is intended to replace the rt4k_esp32 project after the manufacture
 
 It's designed to run on the Raspberry Pi Zero 2 W (Pi02W), and only the Pi02W: the Zero 2 is the only model that has "unlimited" power output due to having a direct shunt between the USB power input and output, and we need the W version to be able to communicate with it over wifi. You connect the RT4K power supply to the Pi02W power input, and the RT4K itself to the other Pi02W USB port.
 
-rt4k_pi connects to the RT4K over USB. It provides a web remote, a live view of the RT4K's on-screen display, device status, firmware updates, and access to the RT4K's SD card through a network share.
+device status, firmware updates, an SD card factory reset, and access
 
 Use rt4k_pi only on a trusted home network. Do not expose its web interface, file sharing, or serial TCP service to the internet.
 
@@ -71,3 +71,11 @@ Interrupted updates are never resumed automatically. If installation had not sta
 If installation may have started, **leave the RT4K powered on** and wait for it to finish restarting. A timeout does not necessarily mean the update failed. The page continues checking the device and blocks another update until the outcome is known.
 
 If the RT4K cannot start or the page says its SD card needs attention, follow RetroTINK's official recovery instructions. Do not delete firmware files or update records just to bypass a blocked update.
+
+## Factory reset
+
+**Factory Reset** replaces everything on the RT4K's SD card with the latest official SD card files, then installs firmware (latest experimental, latest stable, or the version included with the SD card files). Your own profiles and other files are deleted and not backed up.
+
+- It can take a while. Files that already match are left in place.
+- You can cancel until the card starts changing. If a reset is interrupted after that, run it again.
+- File sharing pauses during a reset. Keep both devices powered until it finishes.

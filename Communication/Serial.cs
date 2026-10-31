@@ -805,7 +805,11 @@ public class Serial : IAsyncDisposable
         return new OperationLease(operationLock);
     }
 
-    public async Task PutFirmwareFileAsync(string path, Stream data, long length, string sha256, Action<long> progress, CancellationToken token)
+    public Task PutFirmwareFileAsync(string path, Stream data, long length, string sha256, Action<long> progress, CancellationToken token)
+        => PutStreamAsync(path, data, length, sha256, progress, token);
+
+    /// <summary>Streams an upload from <paramref name="data"/>, reporting bytes written. The device verifies size and hash before replacing the target.</summary>
+    public async Task PutStreamAsync(string path, Stream data, long length, string sha256, Action<long> progress, CancellationToken token)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cts.Token);
         token = linked.Token;
