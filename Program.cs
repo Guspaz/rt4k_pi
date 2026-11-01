@@ -81,6 +81,7 @@ public partial class Program
             if (!@args.Contains("--bypassinstaller"))
             {
                 Installer.CheckInstall();
+                Installer.EnsureKnownGoodKernel();
             }
 
             Installer.DisableWifiPowerSave();

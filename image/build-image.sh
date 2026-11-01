@@ -63,9 +63,40 @@ mv "$root/etc/resolv.conf" "$root/etc/resolv.conf.orig" 2>/dev/null || true
 cp "$root/etc/resolv.conf.build" "$root/etc/resolv.conf"
 
 echo "Updating packages..."
-chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive bash -euc '
+# Kernels newer than 6.18.39 have a ksmbd bug. Ship 6.18.39 for both Pi kernel flavours, and
+# remove and block the kernel metapackages (the only thing that pulls in newer kernels) so
+# upgrades leave it alone. Keep in sync with KnownGoodKernel in Platform/Installer.cs.
+kernel=6.18.39
+cat > "$root/etc/apt/preferences.d/rt4k-kernel" <<EOF
+Package: linux-image-rpi-* linux-headers-rpi-* linux-base-rpi-*
+Pin: version *
+Pin-Priority: -1
+EOF
+# Not passed as KERNEL: the raspi-firmware hooks read that, and only copy kernels when it's auto
+chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive GOOD_KERNEL="$kernel" bash -euc '
 	apt-get update
 	apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade
+	apt-get -y --no-install-recommends install "linux-image-$GOOD_KERNEL+rpt-rpi-v8" "linux-image-$GOOD_KERNEL+rpt-rpi-2712"
+	remove=$(dpkg-query -W -f="\${Package}\n" "linux-*" | while read -r p; do
+		case "$p" in
+			linux-image-rpi-*|linux-headers-rpi-*|linux-base-rpi-*) echo "$p" ;;
+			*+rpt*)
+				v=${p%%+rpt*}; v=${v##*-}
+				[ "$(printf "%s\n%s\n" "$v" "$GOOD_KERNEL" | sort -V | tail -n1)" = "$GOOD_KERNEL" ] || echo "$p" ;;
+		esac
+	done)
+	[ -z "$remove" ] || apt-get -y purge $remove
+	# The firmware hooks only put the newest installed kernel on the boot partition, and
+	# 6.18.39 was not the newest when it was installed
+	for flavour in v8 2712; do
+		version="$GOOD_KERNEL+rpt-rpi-$flavour"
+		DEB_MAINT_PARAMS=configure /etc/kernel/postinst.d/z50-raspi-firmware "$version" "/boot/vmlinuz-$version"
+		DEB_MAINT_PARAMS=configure /etc/initramfs/post-update.d/z50-raspi-firmware "$version" "/boot/initrd.img-$version"
+	done
+	cmp "/boot/vmlinuz-$GOOD_KERNEL+rpt-rpi-v8" /boot/firmware/kernel8.img
+	cmp "/boot/vmlinuz-$GOOD_KERNEL+rpt-rpi-2712" /boot/firmware/kernel_2712.img
+	cmp "/boot/initrd.img-$GOOD_KERNEL+rpt-rpi-v8" /boot/firmware/initramfs8
+	cmp "/boot/initrd.img-$GOOD_KERNEL+rpt-rpi-2712" /boot/firmware/initramfs_2712
 	apt-get -y install fuse3 ksmbd-tools iw
 	apt-get -y autoremove --purge
 	apt-get clean

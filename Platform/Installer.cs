@@ -161,6 +161,168 @@ public class Installer
         Environment.Exit(0);
     }
 
+    // Kernels newer than this have a ksmbd bug. Until a fixed one is confirmed, the kernel
+    // metapackages (the only thing that pulls in newer kernels) are removed and blocked, so
+    // upgrades leave the kernel alone. A later release undoes this by deleting KernelPinFile and
+    // installing linux-image-rpi-<flavour>. Keep in sync with image/build-image.sh.
+    private static readonly Version KnownGoodKernel = new(6, 18, 39);
+    private const string KernelPinFile = "/etc/apt/preferences.d/rt4k-kernel";
+    private const string KernelPin =
+        "Package: linux-image-rpi-* linux-headers-rpi-* linux-base-rpi-*\n" +
+        "Pin: version *\n" +
+        "Pin-Priority: -1\n";
+    private const string KernelRepairMarker = "/var/lib/rt4k_pi/kernel-repair-attempted";
+
+    /// <summary>
+    /// Keeps the Pi on a kernel without the ksmbd bug. Upgrades are blocked from moving past it,
+    /// and if the running kernel is already newer, the known-good one is installed in its place
+    /// and the Pi rebooted into it.
+    ///
+    /// Only this Pi's kernel flavour is installed: every kernel builds its own initramfs, which
+    /// takes minutes on a Pi Zero 2 W. Everything newer than the known-good kernel goes, in every
+    /// flavour, both so the Pi boots the right one and because Raspberry Pi's initramfs trigger
+    /// rebuilds every flavour of the newest installed kernel on unrelated upgrades.
+    /// Only tried once per kernel, so a failure can't turn into a reboot loop.
+    /// </summary>
+    public static void EnsureKnownGoodKernel()
+    {
+        try
+        {
+            string release = Util.RunCommand("uname", "-r");
+            const string flavourPrefix = "+rpt-rpi-";
+            int plus = release.IndexOf(flavourPrefix, StringComparison.Ordinal);
+            if (plus < 0 || !Version.TryParse(release[..plus], out Version? running))
+            {
+                Console.WriteLine($"Kernel {release} is not a Raspberry Pi OS kernel, leaving it alone");
+                return;
+            }
+
+            // Older releases (bookworm's 6.12) never get the affected kernels
+            if (running < new Version(KnownGoodKernel.Major, KnownGoodKernel.Minor))
+            {
+                return;
+            }
+
+            if (!File.Exists(KernelPinFile) || File.ReadAllText(KernelPinFile) != KernelPin)
+            {
+                File.WriteAllText(KernelPinFile, KernelPin);
+                Console.WriteLine($"Blocked kernel upgrades past {KnownGoodKernel}");
+            }
+
+            if (running <= KnownGoodKernel)
+            {
+                return;
+            }
+
+            string flavour = release[(plus + flavourPrefix.Length)..];
+            if (flavour is not ("v8" or "2712"))
+            {
+                Console.WriteLine($"Kernel {release} is newer than {KnownGoodKernel} but its flavour isn't one we know, leaving it alone");
+                return;
+            }
+
+            if (File.Exists(KernelRepairMarker) && File.ReadAllText(KernelRepairMarker).Trim() == release)
+            {
+                Console.WriteLine($"Already tried to replace kernel {release}, not trying again; file sharing may be unreliable");
+                return;
+            }
+
+            Console.WriteLine($"Kernel {release} has a file sharing bug, switching to {KnownGoodKernel}");
+            const string env = "env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a";
+            const string options = "-o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold";
+            string good = $"{KnownGoodKernel}{flavourPrefix}{flavour}";
+            string package = $"linux-image-{good}";
+
+            Util.RunElevated($"{env} dpkg --configure -a", SystemUpgradeTimeoutMs);
+            Util.RunElevated($"{env} apt-get {options} update", PackageTimeoutMs);
+
+            // Installed while the current kernel is still in place, so a failure here (no network,
+            // say) leaves the Pi as it was and free to try again next start. Its own install
+            // builds the one initramfs it needs.
+            Util.RunElevated($"{env} apt-get {options} -y --no-install-recommends install {package}", SystemUpgradeTimeoutMs);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(KernelRepairMarker)!);
+            File.WriteAllText(KernelRepairMarker, release);
+
+            List<string> remove = Util.RunCommand("dpkg-query", "-W -f=${Package}\\t${db:Status-Abbrev}\\n linux-*")
+                .Split('\n')
+                .Select(line => line.Split('\t'))
+                .Where(f => f.Length == 2 && f[1].Length > 1 && f[1][1] != 'n')
+                .Select(f => f[0])
+                .Where(p => p.StartsWith("linux-image-rpi-", StringComparison.Ordinal) ||
+                            p.StartsWith("linux-headers-rpi-", StringComparison.Ordinal) ||
+                            p.StartsWith("linux-base-rpi-", StringComparison.Ordinal) ||
+                            KernelPackageVersion(p) > KnownGoodKernel)
+                .ToList();
+
+            if (remove.Count > 0)
+            {
+                // Removing the running kernel is fine since we're about to reboot; noninteractive
+                // keeps linux-base from stopping to ask about it
+                Util.RunElevated($"{env} apt-get {options} -y purge {string.Join(' ', remove)}", SystemUpgradeTimeoutMs);
+            }
+
+            if (!InstallBootFiles(good, flavour))
+            {
+                // Not rebooted, so there's no loop to guard against: try again next start
+                File.Delete(KernelRepairMarker);
+                return;
+            }
+
+            Console.WriteLine($"Kernel {KnownGoodKernel} installed, rebooting into it");
+            Util.RunElevated("systemctl reboot");
+            Environment.Exit(0);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error switching to kernel {KnownGoodKernel}: {ex.Message}");
+        }
+    }
+
+    /// <summary>The upstream version in a versioned kernel package name, like the 6.18.50 in
+    /// linux-image-6.18.50+rpt-rpi-v8 or linux-kbuild-6.18.50+rpt.</summary>
+    private static Version? KernelPackageVersion(string package)
+    {
+        int rpt = package.IndexOf("+rpt", StringComparison.Ordinal);
+        if (!package.StartsWith("linux-", StringComparison.Ordinal) || rpt < 0) { return null; }
+
+        int dash = package.LastIndexOf('-', rpt);
+        return Version.TryParse(package[(dash + 1)..rpt], out Version? version) ? version : null;
+    }
+
+    /// <summary>
+    /// Puts the given kernel and its initramfs on the boot partition. The firmware hooks only
+    /// copy the newest installed kernel, and it wasn't the newest when it was installed, so
+    /// they're rerun now that the newer kernels are gone.
+    /// </summary>
+    private static bool InstallBootFiles(string version, string flavour)
+    {
+        try
+        {
+            string kernel = $"/boot/vmlinuz-{version}";
+            string initrd = $"/boot/initrd.img-{version}";
+            string suffix = flavour == "2712" ? "_2712" : "8";
+
+            if (!File.Exists(initrd))
+            {
+                Util.RunElevated($"update-initramfs -c -k {version}", SystemUpgradeTimeoutMs);
+            }
+
+            Util.RunElevated($"env DEB_MAINT_PARAMS=configure /etc/kernel/postinst.d/z50-raspi-firmware {version} {kernel}", PackageTimeoutMs);
+            Util.RunElevated($"env DEB_MAINT_PARAMS=configure /etc/initramfs/post-update.d/z50-raspi-firmware {version} {initrd}", PackageTimeoutMs);
+
+            // cmp fails if they differ
+            Util.RunElevated($"cmp -s {kernel} /boot/firmware/kernel{suffix}.img");
+            Util.RunElevated($"cmp -s {initrd} /boot/firmware/initramfs{suffix}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Kernel {version} is installed but couldn't be set up to boot, not rebooting: {ex.Message}");
+            return false;
+        }
+    }
+
     public static string CheckUpdate()
         => CheckUpdateAsync().GetAwaiter().GetResult();
 
