@@ -36,6 +36,10 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     // How far a stale frame is dimmed once the OSD is gone, so it reads as "no longer live"
     private const double StaleDim = 0.45;
 
+    // Recent frames kept so a click can be matched to the frame the user was looking at, even
+    // if newer ones have been published since
+    private const int FrameHistory = 16;
+
     private readonly SemaphoreSlim captureLock = new(1, 1);
 
     // Set when something happened that the OSD is expected to reflect, so the loop stops waiting
@@ -63,14 +67,40 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     private byte[]? lastPng;
     private bool lastWasLive;
 
+    // The menu recognised on the last captured primary plane, if it can be navigated by clicking
+    private OsdMenu? lastMenu;
+
+    // Up/Down drive the on-screen keyboard instead of the menu while it's showing
+    private bool keyboardShown;
+
+    // When the last navigation capture started (a Stopwatch timestamp). Keys sent before then
+    // are already mirrored, so the capture loop needn't repeat the work for them.
+    private long mirroredAt;
+
+    private volatile OsdFrame frame = new(0, OsdState.Unknown, null, null);
+    private readonly Queue<OsdFrame> history = new();
+    private readonly Lock historyLock = new();
+
+    /// <summary>The most recently published frame, its state and the menu shown on it.</summary>
+    public OsdFrame Frame => frame;
+
     /// <summary>The most recent frame, or null if nothing has been captured yet.</summary>
-    public byte[]? CurrentPng => lastPng;
+    public byte[]? CurrentPng => frame.Png;
 
     /// <summary>
     /// Bumped whenever the frame or state actually changes, so a client can tell a genuinely
     /// new frame from a repeat without comparing image bytes.
     /// </summary>
-    public long Revision { get; private set; }
+    public long Revision => frame.Revision;
+
+    /// <summary>A recently published frame, or null once it has aged out of the history.</summary>
+    public OsdFrame? FindFrame(long revision)
+    {
+        lock (historyLock)
+        {
+            return history.FirstOrDefault(f => f.Revision == revision);
+        }
+    }
 
     // Completed and replaced on every change, so listeners can await the next frame instead of
     // polling for one. RunContinuationsAsynchronously keeps waiters off the capture loop's thread.
@@ -135,6 +165,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
                 }
 
                 bool triggered = await trigger.WaitAsync(IdlePollMs, token);
+                long requested = System.Diagnostics.Stopwatch.GetTimestamp();
 
                 if (triggered)
                 {
@@ -147,6 +178,13 @@ public class OsdMirror(Serial serial, RT4K rt4k)
 
                 try
                 {
+                    // Click navigation captures for itself once its keys are in, so the keys that
+                    // woke us have already been mirrored and another pass would only repeat it.
+                    if (triggered && Interlocked.Read(ref mirroredAt) > requested)
+                    {
+                        continue;
+                    }
+
                     await CaptureAsync(token);
 
                     // Deliberately after the capture: the frame the user is waiting on goes out
@@ -232,13 +270,99 @@ public class OsdMirror(Serial serial, RT4K rt4k)
         // Only a real change is worth waking every connected page for
         if (State != previousState || !ReferenceEquals(lastPng, previousPng))
         {
-            Revision++;
+            // A stale frame shows what used to be on screen, so it mustn't be clickable
+            var next = new OsdFrame(frame.Revision + 1, State, lastPng, State == OsdState.Live ? lastMenu : null);
+
+            lock (historyLock)
+            {
+                history.Enqueue(next);
+
+                while (history.Count > FrameHistory)
+                {
+                    history.Dequeue();
+                }
+            }
+
+            frame = next;
 
             // Release anyone waiting on the old revision and arm the next wait
             TaskCompletionSource previous = changed;
             changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             previous.TrySetResult();
         }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> with the capture loop held off, so a click's keys and its
+    /// captures aren't interleaved with the loop's own.
+    /// </summary>
+    public async Task<T> ExclusiveAsync<T>(Func<Task<T>> action, CancellationToken token)
+    {
+        await captureLock.WaitAsync(token);
+
+        try
+        {
+            return await action();
+        }
+        finally
+        {
+            captureLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Reads the primary plane as it is right now, without publishing it, and recognises the menu
+    /// on it. Null when there is no menu that can safely be navigated. Call inside
+    /// <see cref="ExclusiveAsync"/>.
+    /// </summary>
+    public async Task<OsdMenu?> ReadMenuAsync(CancellationToken token)
+    {
+        if (!serial.IsConnected || rt4k.Power != RT4K.PowerState.On)
+        {
+            return null;
+        }
+
+        try
+        {
+            // Unanswered means we can't rule the keyboard out, so don't risk typing into it
+            if (await QueryAuxAsync(token) is not { Keyboard: false })
+            {
+                return null;
+            }
+
+            var (text, color, info) = await serial.GetOsdAsync(aux: false, quiet: true, token: token);
+
+            return OsdNavigation.Analyze(new OsdGrid(text, color, Field(info, "rows", 32), Field(info, "width", 40), Field(info, "stride", OsdRenderer.Stride)));
+        }
+        catch (Exception ex) when (ex is SerialException or IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Captures and publishes a frame now. Call inside <see cref="ExclusiveAsync"/>.
+    /// </summary>
+    /// <returns>The new frame, or null if nothing new could be captured.</returns>
+    public async Task<OsdFrame?> RefreshAsync(CancellationToken token)
+    {
+        long seen = frame.Revision;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        // Everything that asked for a capture so far is covered by this one
+        while (trigger.Wait(0))
+        {
+        }
+
+        await CaptureAsync(token);
+
+        if (frame.Revision == seen)
+        {
+            return null;
+        }
+
+        Interlocked.Exchange(ref mirroredAt, started);
+        return frame;
     }
 
     private async Task CaptureCoreAsync(CancellationToken token)
@@ -261,8 +385,8 @@ public class OsdMirror(Serial serial, RT4K rt4k)
         {
             font ??= await serial.GetFontAsync(quiet: true, token: token);
 
-            var (primaryFailed, primary) = await CapturePlaneAsync(aux: false, token);
-            var (secondaryFailed, secondary) = await CapturePlaneAsync(aux: true, token);
+            var (primaryFailed, primary, grid) = await CapturePlaneAsync(aux: false, token);
+            var (secondaryFailed, secondary, _) = await CapturePlaneAsync(aux: true, token);
 
             if (primaryFailed || secondaryFailed)
             {
@@ -292,6 +416,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
             // image change, so it's refreshed on its own schedule rather than blocking a capture.
             lastFrame = Compose(primary, secondary);
             lastPng = Png.Encode(lastFrame);
+            lastMenu = grid == null || keyboardShown ? null : OsdNavigation.Analyze(grid);
             lastWasLive = true;
             State = OsdState.Live;
         }
@@ -317,13 +442,19 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     /// reported separately from a hidden plane: composing a frame from a half-finished capture
     /// would make planes flicker in and out for reasons the user can't see.
     /// </remarks>
-    private async Task<(bool Failed, Bitmap? Image)> CapturePlaneAsync(bool aux, CancellationToken token)
+    private async Task<(bool Failed, Bitmap? Image, OsdGrid? Grid)> CapturePlaneAsync(bool aux, CancellationToken token)
     {
         try
         {
-            if (aux && !await IsAuxShownAsync(token))
+            if (aux)
             {
-                return (false, null);
+                var state = await QueryAuxAsync(token);
+                keyboardShown = state is { Shown: true, Keyboard: true };
+
+                if (state is not { Shown: true })
+                {
+                    return (false, null, null);
+                }
             }
 
             var (text, color, info) = await serial.GetOsdAsync(aux, quiet: true, token: token);
@@ -344,7 +475,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
                     blankTopRows = 0;
                 }
 
-                return (false, null);
+                return (false, null, null);
             }
 
             if (!aux)
@@ -355,7 +486,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
                 blankTopRows = CountBlankTopRows(text, color, rows, cols, stride);
             }
 
-            return (false, OsdRenderer.Render(text, color, font!, rows, cols, stride));
+            return (false, OsdRenderer.Render(text, color, font!, rows, cols, stride), aux ? null : new OsdGrid(text, color, rows, cols, stride));
         }
         catch (SerialException ex)
         {
@@ -368,7 +499,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
                 blankTopRows = 0;
             }
 
-            return (!hidden, null);
+            return (!hidden, null, null);
         }
     }
 
@@ -436,12 +567,19 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     /// <summary>
     /// Cheap text query for the secondary plane. Pulling it while on=0 would mirror stale cells.
     /// </summary>
-    private async Task<bool> IsAuxShownAsync(CancellationToken token)
+    /// <returns>Whether it's showing and whether that's the on-screen keyboard, or null if the device didn't answer.</returns>
+    private async Task<(bool Shown, bool Keyboard)?> QueryAuxAsync(CancellationToken token)
     {
         var lines = await serial.SendCommandAsync("osd2 state", line => line.StartsWith("osd2 "), token: token, echoIf: _ => Program.Settings.VerboseLogging);
         string? state = lines.FirstOrDefault(line => line.StartsWith("osd2 "));
 
-        return state != null && Serial.ParseFields(state).GetValueOrDefault("on") == "1";
+        if (state == null)
+        {
+            return null;
+        }
+
+        var fields = Serial.ParseFields(state);
+        return (fields.GetValueOrDefault("on") == "1", fields.GetValueOrDefault("osk") == "1");
     }
 
     /// <summary>
@@ -630,3 +768,7 @@ public class OsdMirror(Serial serial, RT4K rt4k)
     private static int Field(Dictionary<string, string> info, string key, int fallback)
         => info.TryGetValue(key, out string? value) && int.TryParse(value, out int parsed) ? parsed : fallback;
 }
+
+/// <summary>One published mirror frame. The menu is null unless the frame is live and clickable.</summary>
+/// <remarks>The primary plane, and so every menu item, is drawn at the image's top left corner.</remarks>
+public sealed record OsdFrame(long Revision, OsdMirror.OsdState State, byte[]? Png, OsdMenu? Menu);

@@ -37,32 +37,19 @@ public sealed class SdCardCatalog(HttpClient http)
         foreach (Match section in Matches(html, @"<h2\b[^>]*>\s*Version\s+(?<version>\d+\.\d+\.\d+)\s+\((?<date>\d{4}-\d{2}-\d{2})\)</h2>(?<body>.*?)(?=<h2\b|</section>|\z)"))
         {
             string body = section.Groups["body"].Value;
-            var links = Matches(body, "href=\"(?<url>[^\"]+\\.zip)\"");
             var hashes = Matches(body, @"SHA-256:\s*<code\b[^>]*>\s*(?<hash>[a-f0-9]{64})\s*</code>");
-            if (links.Count != 1 || hashes.Count != 1) { throw new InvalidDataException("The official SD card listing has an unrecognized format."); }
-            string url = WebUtility.HtmlDecode(links[0].Groups["url"].Value);
-            ValidateDownload(url);
+            if (!FirmwareCatalog.TryGetDownload(body, Page, out string url) || hashes.Count != 1) { throw new InvalidDataException("The official SD card listing has an unrecognized format."); }
             result.Add(new(section.Groups["version"].Value, section.Groups["date"].Value, url, hashes[0].Groups["hash"].Value.ToLowerInvariant()));
         }
         if (result.Count == 0) { throw new InvalidDataException("The official SD card listing is empty."); }
         return [.. result.OrderByDescending(r => Version.Parse(r.Version))];
     }
 
-    public static void ValidateDownload(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.Host != "cdn.jsdelivr.net" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 || !Regex.IsMatch(uri.AbsolutePath, @"\A/gh/retrotink-llc/firmware@(main|[0-9a-fA-F]{7,40})/RetroTINK-4K/SD%20card%20images/[a-zA-Z0-9_.-]+\.zip\z", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
-        {
-            throw new InvalidDataException("The SD card image does not have a recognized official download URL.");
-        }
-    }
-
     /// <summary>Downloads to <paramref name="path"/>, hashing while streaming so verification finishes with the download.</summary>
     public async Task DownloadAsync(SdCardRelease release, string path, Action<long, long?> progress, CancellationToken token)
     {
-        ValidateDownload(release.Download);
         using var response = await http.GetAsync(release.Download, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
-        ValidateDownload(response.RequestMessage!.RequestUri!.AbsoluteUri);
         long? length = response.Content.Headers.ContentLength;
         if (length is > MaxDownloadBytes) { throw new InvalidDataException("The SD card image exceeds the download limit."); }
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);

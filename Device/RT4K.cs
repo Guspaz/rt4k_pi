@@ -195,6 +195,9 @@ public class RT4K
     /// <summary>Server-side mirror of the device's on-screen display.</summary>
     public OsdMirror Osd { get; }
 
+    /// <summary>Turns clicks on the OSD mirror into remote keys.</summary>
+    public OsdNavigator Navigator { get; }
+
     private readonly Serial serial;
     private readonly CancellationTokenSource cts = new();
     private readonly Lock lifecycle = new();
@@ -215,6 +218,7 @@ public class RT4K
     {
         this.serial = serial;
         Osd = new OsdMirror(serial, this);
+        Navigator = new OsdNavigator(this, Osd);
     }
 
     public void Start()
@@ -500,6 +504,40 @@ public class RT4K
     }
 
     public void SendRemote(Remote remote) => SendRemoteAsync(remote).GetAwaiter().GetResult();
+
+    // Gap left after each key's echo in a sequence. The echo only means the key was latched, and
+    // a second key written before the menu consumes the first replaces it. Hardware kept up with
+    // no gap at all, so this is pure margin; see OSD.md.
+    private const int SequenceKeyGapMs = 15;
+
+    /// <summary>
+    /// Sends several keys back to back, without waiting for the screen to update between them.
+    /// </summary>
+    /// <returns>False if a key wasn't acknowledged, in which case the rest weren't sent.</returns>
+    public async Task<bool> SendRemoteSequenceAsync(IReadOnlyList<Remote> keys, CancellationToken token = default)
+    {
+        for (int i = 0; i < keys.Count; i++)
+        {
+            if (i > 0)
+            {
+                await Task.Delay(SequenceKeyGapMs, token);
+            }
+
+            var lines = await serial.SendCommandAsync(
+                "remote " + remoteLookup[keys[i]],
+                line => line.Contains("Serial Remote:") || line.Contains("Serial Remote Bad Command"),
+                timeoutMs: 500,
+                token: token);
+
+            if (!lines.Any(line => line.Contains("Serial Remote:")))
+            {
+                Console.WriteLine($"Remote key {keys[i]} wasn't acknowledged, abandoning the rest of the sequence");
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Injects a remote key. This goes through the command plane rather than a raw write so it

@@ -28,8 +28,12 @@ public partial class Program
             options.ColorBehavior = Microsoft.Extensions.Logging.Console.LoggerColorBehavior.Disabled;
         });
 
-        builder.Services.AddSingleton(_ => new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) });
+        builder.Services.AddSingleton(_ => new HttpClient { Timeout = TimeSpan.FromSeconds(60) });
         builder.Services.AddSingleton(provider => new FirmwareCatalog(provider.GetRequiredService<HttpClient>()));
+
+        // Background services are optional extras; one failing must never take down the web UI
+        // along with the serial and FUSE services that share this process.
+        builder.Services.Configure<HostOptions>(options => options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
         builder.Services.AddHostedService<FirmwareCatalogRefresh>();
 
         var app = builder.Build();
@@ -156,6 +160,24 @@ public partial class Program
             }
         });
         app.MapPost("/RunBenchmark", async () => RT4K is null ? $"{rt4k_pi.RT4K.DisplayName} not available" : await RT4K.BenchmarkAsync());
+
+        // A click on the OSD mirror, in the image's own pixels, aimed at the frame with this
+        // revision. The server works out what it means from that frame, not the newest one.
+        app.MapPost("/OsdClick", async ([FromQuery] long rev, [FromQuery] int x, [FromQuery] int y, [FromQuery] string gesture, CancellationToken token) =>
+        {
+            if (RT4K is null)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (!Enum.TryParse(gesture, true, out OsdGesture parsed) || !Enum.IsDefined(parsed))
+            {
+                return Results.BadRequest("Unknown gesture");
+            }
+
+            OsdClickResult result = await RT4K.Navigator.ClickAsync(rev, x, y, parsed, token);
+            return Results.Text(result.ToString());
+        });
     }
 
     private static void MapDeviceStreams(WebApplication app, AppState appState)
@@ -205,20 +227,14 @@ public partial class Program
             {
                 while (!token.IsCancellationRequested)
                 {
-                    // Read the revision first: if a capture lands between these two reads we'd
-                    // rather re-send the same frame next pass than record a revision we never sent.
-                    long revision = osd.Revision;
-                    byte[]? png = osd.CurrentPng;
+                    // One immutable snapshot, so the image, state and menu always belong together
+                    OsdFrame frame = osd.Frame;
 
-                    if (revision != sent)
+                    if (frame.Revision != sent)
                     {
-                        sent = revision;
+                        sent = frame.Revision;
 
-                        // Inlined as a data URI: the frame is small, and this keeps the image and
-                        // the state it belongs to in a single atomic message.
-                        string image = png is null ? "" : Convert.ToBase64String(png);
-
-                        await context.Response.WriteAsync($"data: {{\"state\":\"{osd.State}\",\"image\":\"{image}\"}}\n\n", token);
+                        await context.Response.WriteAsync($"data: {OsdFrameJson(frame)}\n\n", token);
                     }
                     else
                     {
@@ -317,5 +333,53 @@ public partial class Program
             }
         });
 
+    }
+
+    /// <summary>
+    /// One OSD stream message: the frame inlined as a data URI, plus where its clickable rows are
+    /// so the page can outline them. Positions are in the image's own pixels.
+    /// </summary>
+    private static string OsdFrameJson(OsdFrame frame)
+    {
+        using var buffer = new MemoryStream();
+
+        using (var json = new Utf8JsonWriter(buffer))
+        {
+            json.WriteStartObject();
+            json.WriteNumber("revision", frame.Revision);
+            json.WriteString("state", frame.State.ToString());
+            json.WriteString("image", frame.Png is null ? "" : Convert.ToBase64String(frame.Png));
+
+            if (frame.Menu is OsdMenu menu)
+            {
+                json.WriteStartObject("menu");
+                json.WriteNumber("width", menu.Cols * OsdRenderer.GlyphWidth);
+                json.WriteNumber("rowHeight", OsdRenderer.GlyphHeight);
+                json.WriteNumber("selected", menu.Selected.Row);
+                json.WriteStartArray("items");
+
+                foreach (OsdItem item in menu.Items)
+                {
+                    json.WriteStartObject();
+                    json.WriteNumber("row", item.Row);
+
+                    // Only the selected row of a tree menu changes its value when clicked
+                    if (OsdNavigation.IsValueZone(menu, item, item.ValueStart))
+                    {
+                        json.WriteNumber("valueStart", item.ValueStart * OsdRenderer.GlyphWidth);
+                        json.WriteNumber("valueEnd", (item.ValueEnd + 1) * OsdRenderer.GlyphWidth);
+                    }
+
+                    json.WriteEndObject();
+                }
+
+                json.WriteEndArray();
+                json.WriteEndObject();
+            }
+
+            json.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
 }

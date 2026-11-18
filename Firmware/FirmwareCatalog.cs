@@ -64,12 +64,9 @@ public sealed class FirmwareCatalog(HttpClient http, TimeProvider? time = null)
         foreach (Match section in Matches(html, @"<h2\b[^>]*>\s*Version\s+(?<version>\d+\.\d+\.\d+)\s+\((?<date>\d{4}-\d{2}-\d{2})\)</h2>(?<body>.*?)(?=<h2\b|</section>|\z)"))
         {
             string body = section.Groups["body"].Value;
-            var links = Matches(body, "href=\"(?<url>[^\"]+\\.zip)\"");
             var hashes = Matches(body, @"SHA-256:\s*<code\b[^>]*>\s*(?<hash>[a-f0-9]{64})\s*</code>");
             var notes = Matches(body, @"<h3\b[^>]*>Changelog:?</h3>(?<notes>.*)");
-            if (links.Count != 1 || hashes.Count != 1 || notes.Count != 1) { throw new InvalidDataException("The official firmware listing has an unrecognized format. No update was started."); }
-            string url = WebUtility.HtmlDecode(links[0].Groups["url"].Value);
-            ValidateDownload(url);
+            if (!TryGetDownload(body, Site + (experimental ? "4k-experimental.html" : "4k.html"), out string url) || hashes.Count != 1 || notes.Count != 1) { throw new InvalidDataException("The official firmware listing has an unrecognized format. No update was started."); }
             string version = section.Groups["version"].Value;
             if (!Version.TryParse(version, out _)) { throw new InvalidDataException("Invalid release version."); }
             string text = Regex.Replace(notes[0].Groups["notes"].Value, @"\s+", " ", RegexOptions.None, TimeSpan.FromSeconds(2));
@@ -84,20 +81,25 @@ public sealed class FirmwareCatalog(HttpClient http, TimeProvider? time = null)
         return [.. result];
     }
 
-    public static void ValidateDownload(string url)
+    /// <summary>
+    /// Finds a release's download by its "Download" label rather than by what the URL looks like,
+    /// so the files can move hosts without breaking anything. The URL needs no vetting: the
+    /// SHA-256 beside it vouches for the file, and the listing is served from the same
+    /// repository as the firmware, so anyone able to change the link could change the files too.
+    /// </summary>
+    internal static bool TryGetDownload(string body, string page, out string url)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.Host != "cdn.jsdelivr.net" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 || !Regex.IsMatch(uri.AbsolutePath, @"\A/gh/retrotink-llc/firmware@(main|[0-9a-fA-F]{7,40})/RetroTINK-4K/[a-zA-Z0-9_./-]+\.zip\z", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
-        {
-            throw new InvalidDataException("The release does not have a recognized official download URL.");
-        }
+        url = "";
+        var links = Matches(body, "<a\\b[^>]*?\\bhref=\"(?<url>[^\"]+)\"[^>]*>\\s*Download\\b[^<]*</a>");
+        if (links.Count != 1 || !Uri.TryCreate(new Uri(page), WebUtility.HtmlDecode(links[0].Groups["url"].Value).Trim(), out var uri) || uri.Scheme is not ("https" or "http")) { return false; }
+        url = uri.AbsoluteUri;
+        return true;
     }
 
     public async Task DownloadAsync(FirmwareRelease release, string path, Action<long, long?> progress, CancellationToken token)
     {
-        ValidateDownload(release.Download);
         using var response = await http.GetAsync(release.Download, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
-        ValidateDownload(response.RequestMessage!.RequestUri!.AbsoluteUri);
         long? length = response.Content.Headers.ContentLength;
         if (length is > MaxDownloadBytes) { throw new InvalidDataException("Firmware ZIP exceeds the download limit."); }
         var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path))!);

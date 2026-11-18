@@ -32,7 +32,7 @@ public partial class Program
                 var releases = await catalog.GetAsync(timeout.Token, forceRefresh: refresh == true);
                 return Results.Json(new FirmwareListing(releases, Settings.IncludeExperimentalFirmware), FirmwareJsonContext.Default.FirmwareListing);
             }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or OperationCanceledException)
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or InvalidOperationException or OperationCanceledException)
             {
                 return Results.Text("Could not load official firmware releases: " + ex.Message, statusCode: 503);
             }
@@ -66,7 +66,7 @@ public partial class Program
                 return Results.Accepted();
             }
             catch (InvalidOperationException ex) { return Results.Text(ex.Message, statusCode: 409); }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) { return Results.Text(ex.Message, statusCode: 503); }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or OperationCanceledException) { return Results.Text(ex.Message, statusCode: 503); }
         });
 
         app.MapPost("/Firmware/cancel", (HttpContext context) =>

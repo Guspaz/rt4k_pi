@@ -12,7 +12,7 @@ internal static class Data
 {
     public const string Version = "1.77.0";
     public const string OriginalVersion = "1.75.0";
-    public const string Url = "https://cdn.jsdelivr.net/gh/retrotink-llc/firmware@main/RetroTINK-4K/Experimental/rt4k_1770.zip";
+    public const string Url = "https://github.com/RetroTINK-LLC/firmware/raw/main/RetroTINK-4K/Experimental/rt4k_1770.zip";
     public static string Hash(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
     public static byte[] Binary(string version)
     {

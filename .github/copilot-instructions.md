@@ -8,6 +8,7 @@
 - For RT4K firmware updates, leverage the device's built-in verified atomic put and fwup validation. Use streaming put and report bytes sent without requiring per-frame acknowledgments. Do not issue sha256 serial commands during firmware updates or add duplicate copy-and-move staging; do not clean up partial transfers because the device owns its transfer temporary files. Interrupted operations should be canceled and cleaned up automatically, never resumed. Do not expose a manual recovery/resume action; preserve safety checks before deleting staged or boot files.
 - The factory reset SD card sync must not issue device sha256 commands. To skip uploading files that may be identical, read them back (unhashed get) and compare on the Pi; profile header and BMP spot-check fast paths remain.
 - In rt4k_pi, the firmware Refresh button must fetch fresh available releases rather than reuse the firmware catalog cache.
+- For rt4k_pi's official firmware/SD card listings, find the download link from the HTML structure (the "Download"-labeled link) and rely on the SHA-256 hash and archive checks for integrity, so the listing keeps working if the files move hosts.
 - For rt4k_pi distribution and CI, publish Release-mode, self-contained, single-executable Native AOT builds for Linux ARM64, supporting Raspberry Pi OS Bookworm (Debian 12) and newer. Keep the build environment's glibc baseline compatible with Bookworm.
 
 ## Documentation Guidelines

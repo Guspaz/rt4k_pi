@@ -223,10 +223,24 @@ await Test("Catalog parses changelog as text and rejects missing integrity metad
     Check(spaced == "• First\n• Second wrapped", "HTML formatting created blank lines between bullets.");
     await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.Parse(Data.Html().Replace("SHA-256", "Missing"), true)));
     await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.Parse(Data.Html() + Data.Html(), true)));
-    await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.ValidateDownload("https://evil.example/firmware.zip")));
-    await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.ValidateDownload(Data.Url.Replace("https:", "http:"))));
-    FirmwareCatalog.ValidateDownload(Data.Url.Replace("@main/", "@05b0e1a/"));
-    await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.ValidateDownload(Data.Url.Replace("retrotink-llc", "other-owner"))));
+});
+
+await Test("Catalog finds downloads by label regardless of where they are hosted", async () =>
+{
+    string Link(string html, string href) => html.Replace($"href=\"{Data.Url}\"", $"href=\"{href}\"");
+    foreach (string url in new[] { Data.Url, "https://cdn.example.net/files/firmware?id=1770&amp;format=zip", "https://example.org/download/1770" })
+    {
+        string expected = System.Net.WebUtility.HtmlDecode(url);
+        Check(FirmwareCatalog.Parse(Link(Data.Html(), url), true)[0].Download == expected, "Download URL not taken from the listing: " + url);
+    }
+    Check(FirmwareCatalog.Parse(Link(Data.Html(), "files/rt4k_1770.zip"), true)[0].Download == FirmwareCatalog.Site + "files/rt4k_1770.zip", "Relative download was not resolved against the listing.");
+    string extraLinks = Data.Html(notes: "<ul><li>See <a href=\"https://example.com/notes.zip\">the notes</a></li></ul>");
+    Check(FirmwareCatalog.Parse(extraLinks, true)[0].Download == Data.Url, "Unlabeled links were mistaken for the download.");
+    await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.Parse(Data.Html().Replace(">Download<", ">Get it<"), true)));
+    await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.Parse(Data.Html(notes: $"<p><a href=\"{Data.Url}\">Download</a></p>"), true)));
+    await Reject<InvalidDataException>(() => Task.Run(() => FirmwareCatalog.Parse(Link(Data.Html(), "javascript:alert(1)"), true)));
+    var sd = SdCardCatalog.Parse(Link(Data.Html("1.9.6"), "https://example.org/sd/Rt4k_196_sdcard.zip"));
+    Check(sd.Length == 1 && sd[0].Download == "https://example.org/sd/Rt4k_196_sdcard.zip" && sd[0].Sha256 == new string('a', 64), "SD card listing did not take its download from the label.");
 });
 
 await Test("Catalog sorts semantic versions and caches official listings", async () =>
@@ -612,11 +626,13 @@ if (args.Contains("--live"))
 {
     await Test("Live official listings and latest stable/experimental Pro+CE packages", async () =>
     {
-        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
         var catalog = new FirmwareCatalog(http);
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var releases = await catalog.GetAsync(timeout.Token);
         Console.WriteLine($"Official catalog: {releases.Length} releases; latest {releases[0].Version}.");
+        var sdCards = await new SdCardCatalog(http).GetAsync(timeout.Token);
+        Console.WriteLine($"Official SD card catalog: {sdCards.Length} releases; latest {sdCards[0].Version}.");
         await using var f = new Fixture();
         foreach (var release in new[] { releases.First(r => !r.Experimental), releases.First(r => r.Experimental) })
         {

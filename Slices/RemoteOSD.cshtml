@@ -28,7 +28,10 @@
         <p><button class="@LayoutModel.ButtonClasses" onclick="handleOsdScale(300); return false;" type="button">300%</button></p>
     </div>
     <div style="position: absolute; top: 0px; left: 0px;" id="osdPanel">
-        <img id="osdImage" style="display: none; image-rendering: pixelated;" alt="@rt4k_pi.RT4K.DisplayName OSD" />
+        <div style="position: relative; display: inline-block; user-select: none;">
+            <img id="osdImage" style="display: none; image-rendering: pixelated;" alt="@rt4k_pi.RT4K.DisplayName OSD" draggable="false" />
+            <div id="osdHover" style="display: none; position: absolute; pointer-events: none; outline: 2px solid #0d6efd; outline-offset: -1px;"></div>
+        </div>
         <p id="osdStatus" class="text-muted" data-scaler="@rt4k_pi.RT4K.DisplayName">Waiting for the @rt4k_pi.RT4K.DisplayName&hellip;</p>
     </div>
 </div>
@@ -165,6 +168,18 @@
     // The server renders the OSD 1:1, so magnification is purely a client-side resize
     let osdFactor = @(Model.Settings.OsdScale);
 
+    // The frame on screen, with its clickable rows, and where the pointer is over it
+    let osdFrame = null;
+    let osdPointer = null;
+
+    // A double-click arrives as a click, a repeat and a double. All three are aimed at the frame
+    // showing for the first one, so a row the first click selects doesn't turn the rest into
+    // value changes.
+    let osdGestureRevision = 0;
+
+    // Sent one at a time so the device sees clicks in the order they were made
+    let osdClicks = Promise.resolve();
+
     async function handleOsdScale(factor) {
         const previous = osdFactor;
         osdFactor = factor;
@@ -181,6 +196,8 @@
         if (image.naturalWidth) {
             image.style.width = (image.naturalWidth * (osdFactor / 100.0)) + "px";
         }
+
+        updateOsdHover();
     }
 
     // The OSD is composed server-side and pushed to us, so there is nothing to poll, rate limit
@@ -203,9 +220,12 @@
         const image = document.getElementById('osdImage');
         const status = document.getElementById('osdStatus');
 
+        osdFrame = frame;
+
         if (!frame.image) {
             image.style.display = 'none';
             status.textContent = osdMessages[frame.state] || osdMessages.Unknown;
+            updateOsdHover();
             return;
         }
 
@@ -215,6 +235,7 @@
 
         // A frame is still shown when the OSD goes away, just dimmed, so say why
         status.textContent = frame.state === 'Live' ? '' : (osdMessages[frame.state] || '');
+        updateOsdHover();
     };
 
     osdStream.onerror = () => {
@@ -239,5 +260,106 @@
         clearInterval(osdHeartbeat);
         osdStream.close();
     });
+
+    // Clicking the menu on the mirror: a click moves the cursor to a row, a double-click also
+    // presses OK, and clicking the left or right half of the selected row's value changes it.
+    // The server decides what a click means from the frame it was aimed at, so all the page does
+    // is report where it landed and outline what's under the pointer.
+
+    // Where the pointer is in the frame's own pixels, and the part of the row it would act on
+    function osdTarget(clientX, clientY) {
+        const image = document.getElementById('osdImage');
+        const menu = osdFrame && osdFrame.menu;
+
+        if (!menu || image.style.display === 'none' || !image.naturalWidth) {
+            return null;
+        }
+
+        const rect = image.getBoundingClientRect();
+        const scale = rect.width / image.naturalWidth;
+        const x = Math.floor((clientX - rect.left) / scale);
+        const y = Math.floor((clientY - rect.top) / scale);
+
+        if (x < 0 || y < 0 || x >= menu.width) {
+            return null;
+        }
+
+        const row = Math.floor(y / menu.rowHeight);
+        const item = menu.items.find(i => i.row === row);
+
+        if (!item) {
+            return null;
+        }
+
+        // Matches the server: the value's left half is Left, everything right of it is Right
+        let left = 0;
+        let right = menu.width;
+
+        if (item.valueStart !== undefined && x >= item.valueStart) {
+            const middle = (item.valueStart + item.valueEnd) / 2;
+
+            if (x < middle) {
+                left = item.valueStart;
+                right = Math.ceil(middle);
+            } else {
+                left = Math.ceil(middle);
+            }
+        } else if (item.valueStart !== undefined) {
+            right = item.valueStart;
+        }
+
+        return { x, y, scale, left, right, top: row * menu.rowHeight, height: menu.rowHeight };
+    }
+
+    function updateOsdHover() {
+        const image = document.getElementById('osdImage');
+        const hover = document.getElementById('osdHover');
+        const target = osdPointer && osdTarget(osdPointer.x, osdPointer.y);
+
+        image.style.cursor = target ? 'pointer' : '';
+
+        if (!target) {
+            hover.style.display = 'none';
+            return;
+        }
+
+        hover.style.left = (target.left * target.scale) + 'px';
+        hover.style.top = (target.top * target.scale) + 'px';
+        hover.style.width = ((target.right - target.left) * target.scale) + 'px';
+        hover.style.height = (target.height * target.scale) + 'px';
+        hover.style.display = '';
+    }
+
+    function sendOsdClick(event, gesture) {
+        if (gesture === 'click') {
+            osdGestureRevision = osdFrame && osdFrame.menu ? osdFrame.revision : 0;
+        }
+
+        const target = osdTarget(event.clientX, event.clientY);
+
+        if (!target || !osdGestureRevision) {
+            return;
+        }
+
+        const url = `/OsdClick?rev=${osdGestureRevision}&x=${target.x}&y=${target.y}&gesture=${gesture}`;
+
+        // The resulting frame arrives on the stream by itself, so the reply needs no handling
+        osdClicks = osdClicks.then(() => fetch(url, { method: 'POST' }).catch(() => { }));
+    }
+
+    const osdImageElement = document.getElementById('osdImage');
+
+    osdImageElement.addEventListener('mousemove', (event) => {
+        osdPointer = { x: event.clientX, y: event.clientY };
+        updateOsdHover();
+    });
+
+    osdImageElement.addEventListener('mouseleave', () => {
+        osdPointer = null;
+        updateOsdHover();
+    });
+
+    osdImageElement.addEventListener('click', (event) => sendOsdClick(event, event.detail > 1 ? 'repeat' : 'click'));
+    osdImageElement.addEventListener('dblclick', (event) => sendOsdClick(event, 'double'));
 
 </script>

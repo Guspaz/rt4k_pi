@@ -13,12 +13,16 @@ public sealed class FirmwareCatalogRefresh(FirmwareCatalog catalog) : Background
                 await catalog.GetAsync(timeout.Token);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or OperationCanceledException)
+            catch (Exception ex)
             {
-                Console.WriteLine("Firmware release check: " + ex.Message);
+                // A failed check only means no update is offered; letting it escape would end
+                // this service and, with it, the whole host.
+                bool expected = ex is HttpRequestException or IOException or InvalidDataException or InvalidOperationException or OperationCanceledException;
+                Console.WriteLine("Firmware release check: " + (expected ? ex.Message : $"{ex.GetType().Name}: {ex.Message}"));
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            try { await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
         }
     }
 }
